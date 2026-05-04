@@ -4,6 +4,9 @@ pydantic
 jinja2
 python-multipart
 emails  # 用于发送邮件
+requests  # 用于 HTTP 请求
+beautifulsoup4  # 用于解析 HTML
+lxml  # 用于解析 XML sitemap
 python-dotenv
 pytest 
 httpx
