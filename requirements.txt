@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+jinja2
+python-multipart
+emails  # 用于发送邮件
+python-dotenv
+pytest 
+httpx
