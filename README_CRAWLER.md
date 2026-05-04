@@ -9,7 +9,8 @@
 - **可配置**: 通过 CLI 参数、JSON 配置文件或环境变量进行灵活配置
 - **进度跟踪**: 实时进度回调和统计信息
 - **输出**: 将结果保存到 JSON 文件以供进一步分析
-- **Robots.txt 支持**: 自动检查 robots.txt 中的站点地图 URL
+- **Robots.txt 支持**: 爬取前自动检查 robots.txt，如禁止则终止爬取
+- **域名自动补全**: 支持直接输入域名，自动补充 https 协议和默认路径
 
 ## 安装
 
@@ -31,12 +32,15 @@
 # 最简单用法（自动读取默认配置文件）
 python -m app.main_crawler
 
-# 基本用法
-python -m app.main_crawler --sitemap-url https://example.com/sitemap.xml
+# 使用域名（自动补充 https 和 /sitemap.xml）
+python -m app.main_crawler --sitemap-url example.com
+
+# 指定自定义站点地图路径
+python -m app.main_crawler --sitemap-url example.com --sitemap-path /custom-sitemap.xml
 
 # 带选项
 python -m app.main_crawler \
-    --sitemap-url https://example.com/sitemap.xml \
+    --sitemap-url example.com \
     --max-urls 100 \
     --timeout 60 \
     --delay 1.0 \
@@ -50,14 +54,16 @@ python -m app.main_crawler --config app/config/crawler_config.json
 
 | 选项 | 描述 | 默认值 |
 |--------|-------------|---------|
-| `--sitemap-url, -u` | 要爬取的站点地图 URL | 配置文件中的值 |
+| `--sitemap-url, -u` | 要爬取的站点地图 URL 或域名 | 配置文件中的值 |
+| `--sitemap-path` | 站点地图路径（当 sitemap-url 为域名时使用） | /sitemap.xml |
+| `--robots-path` | robots.txt 路径 | /robots.txt |
 | `--config, -c` | JSON 配置文件路径 | - |
 | `--timeout, -t` | 请求超时时间（秒） | 30 |
 | `--max-urls, -m` | 最大爬取 URL 数量 | 无限制 |
 | `--delay, -d` | 请求间隔时间（秒） | 0.5 |
 | `--no-ssl-verify` | 禁用 SSL 证书验证 | False |
 | `--no-follow-redirects` | 不跟随重定向 | False |
-| `--output-dir, -o` | 结果保存目录 | ./crawl_results |
+| `--output-dir, -o` | 爬取结果保存目录 | ./crawl_results |
 | `--no-save` | 不保存结果到文件 | False |
 | `--quiet, -q` | 禁用详细输出 | False |
 | `--verbose, -v` | 启用调试日志 | False |
@@ -226,7 +232,8 @@ for url in urls:
 
 ```json
 {
-  "sitemap_url": "https://example.com/sitemap.xml",
+  "sitemap_url": "example.com",
+  "sitemap_path": "/sitemap.xml",
   "timeout": 30,
   "max_urls": 100,
   "delay_between_requests": 0.5,
@@ -235,10 +242,29 @@ for url in urls:
   "follow_redirects": true,
   "max_content_length": 10485760,
   "check_robots_txt": true,
+  "robots_path": "/robots.txt",
   "save_results": true,
   "verbose": true
 }
 ```
+
+### 配置项说明
+
+| 配置项 | 描述 | 默认值 |
+|--------|-------------|---------|
+| `sitemap_url` | 站点地图 URL 或域名 | - |
+| `sitemap_path` | 站点地图路径（当 sitemap_url 为域名时使用） | /sitemap.xml |
+| `robots_path` | robots.txt 路径 | /robots.txt |
+| `check_robots_txt` | 是否检查 robots.txt | true |
+| `timeout` | 请求超时时间（秒） | 30 |
+| `max_urls` | 最大爬取 URL 数量 | null（无限制） |
+| `delay_between_requests` | 请求间隔时间（秒） | 0.5 |
+| `output_dir` | 结果保存目录 | ./crawl_results |
+| `verify_ssl` | 是否验证 SSL 证书 | true |
+| `follow_redirects` | 是否跟随重定向 | true |
+| `max_content_length` | 最大内容长度（字节） | 10485760 |
+| `save_results` | 是否保存结果到文件 | true |
+| `verbose` | 是否详细输出 | true |
 
 ## 环境变量
 
