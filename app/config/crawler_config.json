@@ -1,5 +1,6 @@
 {
-  "sitemap_url": "https://javaguide.cn/sitemap.xsl",
+  "sitemap_url": "javaguide.cn",
+  "sitemap_path": "/sitemap.xml",
   "timeout": 30,
   "max_urls": null,
   "delay_between_requests": 0.5,
@@ -9,6 +10,7 @@
   "follow_redirects": true,
   "max_content_length": 10485760,
   "check_robots_txt": true,
+  "robots_path": "/robots.txt",
   "save_results": true,
   "verbose": true
 }

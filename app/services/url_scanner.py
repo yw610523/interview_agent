@@ -122,6 +122,9 @@ class URLScanner:
 
             result.status_code = response.status_code
             result.content_type = response.headers.get('Content-Type', '')
+            
+            # 确保使用正确的编码，优先使用响应头中的编码，否则使用 UTF-8
+            response.encoding = response.apparent_encoding or 'utf-8'
             result.html_content = response.text
             result.load_time = time.time() - start_time
 
@@ -234,18 +237,21 @@ class URLScanner:
                 callback(result, i + 1, len(urls))
         return results
 
-    def check_robots_txt(self, base_url: str) -> Optional[str]:
+    def check_robots_txt(self, base_url: str, robots_path: str = "/robots.txt") -> Optional[str]:
         """
         获取并返回域名的 robots.txt 内容。
 
         参数:
             base_url: 域名的基础 URL
+            robots_path: robots.txt 的路径，默认为 /robots.txt
 
         返回:
             robots.txt 内容，如果未找到返回 None
         """
         parsed = urlparse(base_url)
-        robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+        if not robots_path.startswith('/'):
+            robots_path = '/' + robots_path
+        robots_url = f"{parsed.scheme}://{parsed.netloc}{robots_path}"
 
         try:
             response = self._session.get(robots_url, timeout=10)

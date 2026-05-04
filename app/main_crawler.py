@@ -4,6 +4,7 @@ Sitemap 爬虫 CLI 入口点
 此模块提供运行站点地图爬虫的命令行界面。
 
 使用方法:
+    python -m app.main_crawler                           # 使用默认配置文件
     python -m app.main_crawler --sitemap-url https://example.com/sitemap.xml
     python -m app.main_crawler --config app/config/crawler_config.json
 """
@@ -34,6 +35,7 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
+  %(prog)s                                              # 使用默认配置文件
   %(prog)s --sitemap-url https://example.com/sitemap.xml
   %(prog)s --sitemap-url https://example.com/sitemap.xml --max-urls 100
   %(prog)s --config crawler_config.json
@@ -46,7 +48,17 @@ def parse_args() -> argparse.Namespace:
     input_group.add_argument(
         '--sitemap-url', '-u',
         type=str,
-        help='要爬取的站点地图 URL',
+        help='要爬取的站点地图 URL 或域名',
+    )
+    input_group.add_argument(
+        '--sitemap-path',
+        type=str,
+        help='站点地图路径（当 sitemap-url 为域名时使用，默认: /sitemap.xml）',
+    )
+    input_group.add_argument(
+        '--robots-path',
+        type=str,
+        help='robots.txt 路径（默认: /robots.txt）',
     )
     input_group.add_argument(
         '--config', '-c',
@@ -120,20 +132,30 @@ def main() -> int:
     logger = logging.getLogger(__name__)
 
     # Load configuration
+    DEFAULT_CONFIG_PATH = Path(__file__).parent / 'config' / 'crawler_config.json'
+    
     if args.config:
         config_path = Path(args.config)
         if not config_path.exists():
-            logger.error(f"Configuration file not found: {config_path}")
+            logger.error(f"配置文件未找到: {config_path}")
             return 1
         config = CrawlConfig.from_json(str(config_path))
+    elif DEFAULT_CONFIG_PATH.exists():
+        logger.info(f"使用默认配置文件: {DEFAULT_CONFIG_PATH}")
+        config = CrawlConfig.from_json(str(DEFAULT_CONFIG_PATH))
     else:
         config = get_config_from_env()
 
     # Override config with command line arguments
     if args.sitemap_url:
         config.sitemap_url = args.sitemap_url
+    if args.sitemap_path:
+        config.sitemap_path = args.sitemap_path
+    if args.robots_path:
+        config.robots_path = args.robots_path
+    
     if not config.sitemap_url:
-        logger.error("Sitemap URL is required. Use --sitemap-url or --config")
+        logger.error("需要指定 Sitemap URL。请使用 --sitemap-url 参数或配置文件")
         return 1
 
     config.timeout = args.timeout

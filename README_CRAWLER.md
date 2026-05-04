@@ -28,6 +28,9 @@
 ### 命令行界面
 
 ```bash
+# 最简单用法（自动读取默认配置文件）
+python -m app.main_crawler
+
 # 基本用法
 python -m app.main_crawler --sitemap-url https://example.com/sitemap.xml
 
@@ -39,7 +42,7 @@ python -m app.main_crawler \
     --delay 1.0 \
     --output-dir ./results
 
-# 使用配置文件
+# 使用指定配置文件
 python -m app.main_crawler --config app/config/crawler_config.json
 ```
 
@@ -47,7 +50,7 @@ python -m app.main_crawler --config app/config/crawler_config.json
 
 | 选项 | 描述 | 默认值 |
 |--------|-------------|---------|
-| `--sitemap-url, -u` | 要爬取的站点地图 URL | 必填 |
+| `--sitemap-url, -u` | 要爬取的站点地图 URL | 配置文件中的值 |
 | `--config, -c` | JSON 配置文件路径 | - |
 | `--timeout, -t` | 请求超时时间（秒） | 30 |
 | `--max-urls, -m` | 最大爬取 URL 数量 | 无限制 |

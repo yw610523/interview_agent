@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, asdict
+from urllib.parse import urlparse
 
 from .sitemap_parser import SitemapParser
 from .url_scanner import URLScanner, ScanResult
@@ -37,7 +38,9 @@ class CrawlConfig:
     """站点地图爬虫的配置。"""
     # 站点地图设置
     sitemap_url: str = ""
+    sitemap_path: str = "/sitemap.xml"  # 站点地图路径，当 sitemap_url 为域名时使用
     check_robots_txt: bool = True
+    robots_path: str = "/robots.txt"  # robots.txt 路径
 
     # 扫描器设置
     timeout: int = 30
@@ -62,6 +65,14 @@ class CrawlConfig:
     def from_dict(cls, data: Dict[str, Any]) -> 'CrawlConfig':
         """从字典创建配置。"""
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+    @classmethod
+    def from_json(cls, filepath: str) -> 'CrawlConfig':
+        """从 JSON 文件加载配置。"""
+        import json
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return cls.from_dict(data)
 
 
 class SitemapCrawler:
@@ -106,6 +117,89 @@ class SitemapCrawler:
         """获取爬取统计信息。"""
         return self.stats
 
+    def _normalize_sitemap_url(self, url: str) -> str:
+        """
+        标准化站点地图 URL。
+        如果输入只是域名，自动补充 https 协议和配置的 sitemap 路径。
+
+        参数:
+            url: 输入的 URL 或域名
+
+        返回:
+            标准化后的完整站点地图 URL
+        """
+        url = url.strip()
+        
+        # 如果没有协议，自动补充 https
+        if not url.startswith(('http://', 'https://')):
+            url = f"https://{url}"
+        
+        # 如果只是域名（没有路径），添加配置的 sitemap 路径
+        parsed = urlparse(url)
+        if not parsed.path or parsed.path == '/':
+            sitemap_path = self.config.sitemap_path
+            if not sitemap_path.startswith('/'):
+                sitemap_path = '/' + sitemap_path
+            url = f"{parsed.scheme}://{parsed.netloc}{sitemap_path}"
+        
+        return url
+
+    def _is_allowed_by_robots(self, robots_txt: str, user_agent: str = '*') -> bool:
+        """
+        检查 robots.txt 是否允许指定的用户代理爬取。
+
+        参数:
+            robots_txt: robots.txt 内容
+            user_agent: 用户代理字符串，默认为 '*'
+
+        返回:
+            如果允许爬取返回 True，否则返回 False
+        """
+        if not robots_txt:
+            return True
+
+        current_agent = None
+        allow_all = True
+        disallowed_paths = []
+
+        for line in robots_txt.splitlines():
+            line = line.strip()
+            
+            # 跳过注释和空行
+            if not line or line.startswith('#'):
+                continue
+
+            # 处理 User-agent 行
+            if line.lower().startswith('user-agent:'):
+                agent = line.split(':', 1)[1].strip()
+                current_agent = agent
+                # 如果匹配到指定的 user_agent 或通用 '*'，重置允许状态
+                if agent == user_agent or agent == '*':
+                    allow_all = True
+                    disallowed_paths = []
+                else:
+                    current_agent = None
+            
+            # 只处理当前匹配的 user_agent 的规则
+            if current_agent is None:
+                continue
+
+            # 处理 Disallow 行
+            if line.lower().startswith('disallow:'):
+                path = line.split(':', 1)[1].strip()
+                if path == '/':
+                    allow_all = False
+                else:
+                    disallowed_paths.append(path)
+            
+            # 处理 Allow 行（重置特定路径的禁止状态）
+            if line.lower().startswith('allow:'):
+                path = line.split(':', 1)[1].strip()
+                if path in disallowed_paths:
+                    disallowed_paths.remove(path)
+
+        return allow_all
+
     def crawl(
         self,
         sitemap_url: Optional[str] = None,
@@ -125,14 +219,17 @@ class SitemapCrawler:
         if not sitemap_url:
             raise ValueError("sitemap_url must be provided")
 
+        # 标准化 sitemap URL
+        sitemap_url = self._normalize_sitemap_url(sitemap_url)
+        logger.info(f"标准化后的站点地图 URL: {sitemap_url}")
+
         self.stats = CrawlStats()
         self.stats.start_time = datetime.now().isoformat()
         self._results = []
 
         logger.info(f"Starting crawl for sitemap: {sitemap_url}")
 
-        # Initialize parser and scanner
-        self._sitemap_parser = SitemapParser(sitemap_url)
+        # Initialize scanner first for robots.txt check
         self._url_scanner = URLScanner(
             timeout=self.config.timeout,
             follow_redirects=self.config.follow_redirects,
@@ -140,27 +237,37 @@ class SitemapCrawler:
             max_content_length=self.config.max_content_length,
         )
 
+        # Check robots.txt first
+        if self.config.check_robots_txt:
+            logger.info("检查 robots.txt...")
+            robots_txt = self._url_scanner.check_robots_txt(sitemap_url, self.config.robots_path)
+            if robots_txt:
+                logger.info("找到 robots.txt")
+                if not self._is_allowed_by_robots(robots_txt):
+                    logger.error("robots.txt 禁止爬取此网站")
+                    raise PermissionError("robots.txt 禁止爬取此网站，请检查 robots.txt 设置")
+                else:
+                    logger.info("robots.txt 允许爬取")
+            else:
+                logger.info("未找到 robots.txt，继续爬取")
+
+        # Initialize parser
+        self._sitemap_parser = SitemapParser(sitemap_url)
+
         # Fetch and parse sitemap
-        logger.info("Fetching sitemap...")
+        logger.info("获取站点地图...")
         self._sitemap_parser.fetch_sitemap()
 
-        logger.info("Parsing sitemap...")
+        logger.info("解析站点地图...")
         urls = self._sitemap_parser.parse()
-        logger.info(f"Found {len(urls)} URLs in sitemap")
+        logger.info(f"在站点地图中找到 {len(urls)} 个 URL")
 
         # Apply max_urls limit
         if self.config.max_urls and len(urls) > self.config.max_urls:
             urls = urls[:self.config.max_urls]
-            logger.info(f"Limited to {self.config.max_urls} URLs")
+            logger.info(f"限制为 {self.config.max_urls} 个 URL")
 
         self.stats.total_urls = len(urls)
-
-        # Check robots.txt if enabled
-        if self.config.check_robots_txt and urls:
-            base_url = urls[0]
-            robots_txt = self._url_scanner.check_robots_txt(base_url)
-            if robots_txt:
-                logger.info("Found robots.txt")
 
         # Scan each URL
         logger.info("Starting URL scans...")

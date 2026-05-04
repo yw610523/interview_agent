@@ -39,6 +39,25 @@ class TestCrawlConfig:
         assert data['sitemap_url'] == 'https://example.com/sitemap.xml'
         assert 'timeout' in data
 
+    def test_from_json(self, tmp_path):
+        """测试从 JSON 文件加载配置。"""
+        import json
+        config_data = {
+            'sitemap_url': 'https://example.com/sitemap.xml',
+            'timeout': 60,
+            'max_urls': 50,
+            'delay_between_requests': 1.0,
+        }
+        config_file = tmp_path / 'test_config.json'
+        with open(config_file, 'w') as f:
+            json.dump(config_data, f)
+
+        config = CrawlConfig.from_json(str(config_file))
+        assert config.sitemap_url == 'https://example.com/sitemap.xml'
+        assert config.timeout == 60
+        assert config.max_urls == 50
+        assert config.delay_between_requests == 1.0
+
 
 class TestCrawlStats:
     """CrawlStats 类的测试用例。"""
