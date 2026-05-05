@@ -15,6 +15,8 @@ from urllib.parse import urlparse
 
 from .sitemap_parser import SitemapParser
 from .url_scanner import URLScanner, ScanResult
+from app.config.crawler_config import CrawlerConfig
+from app.config.crawler_config import CrawlerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -33,48 +35,6 @@ class CrawlStats:
         return asdict(self)
 
 
-@dataclass
-class CrawlConfig:
-    """站点地图爬虫的配置。"""
-    # 站点地图设置
-    sitemap_url: str = ""
-    sitemap_path: str = "/sitemap.xml"  # 站点地图路径，当 sitemap_url 为域名时使用
-    check_robots_txt: bool = True
-    robots_path: str = "/robots.txt"  # robots.txt 路径
-
-    # 扫描器设置
-    timeout: int = 30
-    follow_redirects: bool = True
-    verify_ssl: bool = True
-    max_content_length: int = 10 * 1024 * 1024  # 10MB
-
-    # 爬取设置
-    max_urls: Optional[int] = None  # 限制爬取的 URL 数量
-    delay_between_requests: float = 0.0  # 请求之间的延迟（秒）
-
-    # 输出设置
-    output_dir: Optional[str] = None
-    save_results: bool = True
-    verbose: bool = True
-
-    def to_dict(self) -> Dict[str, Any]:
-        """将配置转换为字典。"""
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'CrawlConfig':
-        """从字典创建配置。"""
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
-
-    @classmethod
-    def from_json(cls, filepath: str) -> 'CrawlConfig':
-        """从 JSON 文件加载配置。"""
-        import json
-        with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return cls.from_dict(data)
-
-
 class SitemapCrawler:
     """
     主爬虫，协调站点地图解析和 URL 扫描。
@@ -84,22 +44,22 @@ class SitemapCrawler:
         results = crawler.crawl()
     """
 
-    def __init__(self, config: Optional[CrawlConfig] = None, **kwargs):
+    def __init__(self, config: Optional[CrawlerConfig] = None, **kwargs):
         """
         初始化站点地图爬虫。
 
         参数:
-            config: 包含设置的 CrawlConfig 对象
+            config: 包含设置的 CrawlerConfig 对象
             **kwargs: 用于覆盖配置的额外设置
         """
         if config is None:
-            config = CrawlConfig()
+            config = CrawlerConfig()
 
         # Override config with kwargs
         if kwargs:
             config_dict = asdict(config)
             config_dict.update(kwargs)
-            config = CrawlConfig.from_dict(config_dict)
+            config = CrawlerConfig.from_dict(config_dict)
 
         self.config = config
         self.stats = CrawlStats()

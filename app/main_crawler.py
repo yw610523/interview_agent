@@ -13,9 +13,10 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import cast
 
-from app.services.sitemap_crawler import SitemapCrawler, CrawlConfig
-from app.config.crawler_config import get_config_from_env
+from app.services.sitemap_crawler import SitemapCrawler
+from app.config.crawler_config import CrawlerConfig, get_config_from_env
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -139,10 +140,10 @@ def main() -> int:
         if not config_path.exists():
             logger.error(f"配置文件未找到: {config_path}")
             return 1
-        config = CrawlConfig.from_json(str(config_path))
+        config = CrawlerConfig.from_json(str(config_path))
     elif DEFAULT_CONFIG_PATH.exists():
         logger.info(f"使用默认配置文件: {DEFAULT_CONFIG_PATH}")
-        config = CrawlConfig.from_json(str(DEFAULT_CONFIG_PATH))
+        config = CrawlerConfig.from_json(str(DEFAULT_CONFIG_PATH))
     else:
         config = get_config_from_env()
 

@@ -30,6 +30,8 @@ class CrawlerConfig:
         verbose: 是否打印详细输出
     """
     sitemap_url: str = ""
+    sitemap_path: str = ""
+    robots_path: str = ""
     timeout: int = 30
     max_urls: Optional[int] = None
     delay_between_requests: float = 0.5
@@ -111,3 +113,39 @@ def get_config_from_env() -> CrawlerConfig:
         config.user_agent = user_agent
 
     return config
+
+
+def get_scheduler_config() -> dict:
+    """
+    从环境变量加载定时任务配置。
+
+    返回:
+        包含定时任务配置的字典，包含 hour 和 minute 字段
+    """
+    import os
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
+    return {
+        'hour': int(os.getenv('SCHEDULER_HOUR', 22)),
+        'minute': int(os.getenv('SCHEDULER_MINUTE', 0))
+    }
+
+
+def get_scheduler_config() -> dict:
+    """
+    从环境变量加载定时任务配置。
+
+    返回:
+        包含定时任务配置的字典，包含 hour 和 minute 字段
+    """
+    import os
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
+    return {
+        'hour': int(os.getenv('SCHEDULER_HOUR', 22)),
+        'minute': int(os.getenv('SCHEDULER_MINUTE', 0))
+    }

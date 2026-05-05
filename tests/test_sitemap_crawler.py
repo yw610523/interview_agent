@@ -4,19 +4,20 @@ SitemapCrawler 模块测试。
 
 import pytest
 from unittest.mock import patch, Mock
-from app.services.sitemap_crawler import SitemapCrawler, CrawlConfig, CrawlStats
+from app.services.sitemap_crawler import SitemapCrawler, CrawlStats
+from app.config.crawler_config import CrawlerConfig
 from app.services.url_scanner import ScanResult
 
 
-class TestCrawlConfig:
-    """CrawlConfig 类的测试用例。"""
+class TestCrawlerConfig:
+    """CrawlerConfig 类的测试用例。"""
 
     def test_default_config(self):
         """测试默认配置值。"""
-        config = CrawlConfig()
+        config = CrawlerConfig()
         assert config.timeout == 30
         assert config.max_urls is None
-        assert config.delay_between_requests == 0.0
+        assert config.delay_between_requests == 0.5
         assert config.verify_ssl is True
         assert config.follow_redirects is True
 
@@ -27,14 +28,14 @@ class TestCrawlConfig:
             'timeout': 60,
             'max_urls': 100,
         }
-        config = CrawlConfig.from_dict(data)
+        config = CrawlerConfig.from_dict(data)
         assert config.sitemap_url == 'https://example.com/sitemap.xml'
         assert config.timeout == 60
         assert config.max_urls == 100
 
     def test_to_dict(self):
         """测试将配置转换为字典。"""
-        config = CrawlConfig(sitemap_url='https://example.com/sitemap.xml')
+        config = CrawlerConfig(sitemap_url='https://example.com/sitemap.xml')
         data = config.to_dict()
         assert data['sitemap_url'] == 'https://example.com/sitemap.xml'
         assert 'timeout' in data
@@ -52,7 +53,7 @@ class TestCrawlConfig:
         with open(config_file, 'w') as f:
             json.dump(config_data, f)
 
-        config = CrawlConfig.from_json(str(config_file))
+        config = CrawlerConfig.from_json(str(config_file))
         assert config.sitemap_url == 'https://example.com/sitemap.xml'
         assert config.timeout == 60
         assert config.max_urls == 50
@@ -88,7 +89,7 @@ class TestSitemapCrawler:
 
     def test_init_with_config(self):
         """测试使用配置初始化爬虫。"""
-        config = CrawlConfig(sitemap_url='https://example.com/sitemap.xml')
+        config = CrawlerConfig(sitemap_url='https://example.com/sitemap.xml')
         crawler = SitemapCrawler(config=config)
         assert crawler.config.sitemap_url == 'https://example.com/sitemap.xml'
 

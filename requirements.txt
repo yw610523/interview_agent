@@ -10,3 +10,4 @@ lxml  # 用于解析 XML sitemap
 python-dotenv
 pytest 
 httpx
+apscheduler  # 用于定时任务
