@@ -530,6 +530,86 @@ async def generate_answer(question: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/crawl/single-page", summary="智能爬取单个页面")
+async def crawl_single_page(url: str):
+    """
+    智能爬取单个页面，识别其中的面试问题并存入向量数据库
+    
+    参数:
+        url: 要爬取的页面URL
+    """
+    try:
+        from app.services.url_scanner import URLScanner
+        from app.services.vector_service import VectorRecord
+        
+        logger.info(f"开始爬取单个页面: {url}")
+        
+        # 1. 扫描页面
+        scanner = URLScanner()
+        scan_result = scanner.scan(url)
+        
+        if scan_result.error:
+            raise HTTPException(status_code=400, detail=f"页面扫描失败: {scan_result.error}")
+        
+        logger.info(f"页面扫描成功: {scan_result.title}, 内容长度: {len(scan_result.text_content or '')} 字符")
+        
+        # 2. 构建页面数据
+        page_data = {
+            "url": url,
+            "title": scan_result.title or "",
+            "text_content": scan_result.text_content or "",
+            "html_content": scan_result.html_content or "",
+        }
+        
+        # 3. 使用大模型解析页面内容
+        inserted_count = 0
+        parsed_questions = []
+        
+        def on_question_found(questions):
+            nonlocal inserted_count
+            records = []
+            for q in questions:
+                record = VectorRecord(
+                    id="",
+                    title=q.title,
+                    answer=q.answer,
+                    source_url=q.source_url,
+                    tags=q.tags,
+                    importance_score=q.importance_score,
+                    difficulty=q.difficulty,
+                    category=q.category,
+                )
+                records.append(record)
+            count = vector_service.insert_questions(records)
+            inserted_count += count
+            logger.info(f"识别到 {len(questions)} 个问题，已插入 {count} 个到向量数据库")
+        
+        # 调用大模型处理单个页面
+        parsed_questions = llm_service.parse_crawl_results(
+            [page_data], on_question_found=on_question_found
+        )
+        
+        result = {
+            "status": "success",
+            "message": "页面爬取完成",
+            "url": url,
+            "title": scan_result.title,
+            "parsed_questions": len(parsed_questions),
+            "inserted_questions": inserted_count,
+            "word_count": scan_result.word_count,
+            "load_time": scan_result.load_time,
+        }
+        
+        logger.info(f"单页爬取完成: {result}")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"单页爬取失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # 定时任务调度器
 scheduler = BackgroundScheduler()
 

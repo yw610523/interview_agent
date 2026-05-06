@@ -121,6 +121,12 @@ python -m app.main
 | 接口 | 方法 | 描述 |
 |------|------|------|
 | `/questions/ingest` | POST | 接收并存储面试题到向量数据库 |
+| `/questions/search` | GET | 搜索面试题 |
+| `/questions/{question_id}` | GET | 获取单个面试题详情 |
+| `/questions/{question_id}` | DELETE | 删除面试题 |
+| `/questions` | GET | 获取所有面试题（分页） |
+| `/questions/count` | GET | 获取面试题总数 |
+| `/questions/generate` | POST | 使用大模型生成答案 |
 
 ### 爬虫管理
 
@@ -128,6 +134,7 @@ python -m app.main
 |------|------|------|
 | `/crawl/run` | GET | 手动触发爬虫任务（流式处理） |
 | `/crawl/status` | GET | 获取最近一次爬取状态 |
+| `/crawl/single-page` | POST | 智能爬取单个页面并提取面试问题 |
 
 ### 搜索功能
 
@@ -170,7 +177,32 @@ curl http://localhost:8000/crawl/run
 curl http://localhost:8000/crawl/status
 ```
 
-#### 3. 提交面试题（直接入库）
+#### 3. 智能爬取单个页面
+
+```bash
+curl -X POST "http://localhost:8000/crawl/single-page?url=https://www.runoob.com/python3/python3-tutorial.html"
+```
+
+响应示例：
+```json
+{
+  "status": "success",
+  "message": "页面爬取完成",
+  "url": "https://www.runoob.com/python3/python3-tutorial.html",
+  "title": "Python3 教程",
+  "parsed_questions": 5,
+  "inserted_questions": 5,
+  "word_count": 1234,
+  "load_time": 1.23
+}
+```
+
+**说明**: 
+- 该接口用于快速爬取和分析单个技术页面
+- 自动识别页面中的面试问题并存入向量数据库
+- 适用于临时分析特定技术文章或文档
+
+#### 4. 提交面试题（直接入库）
 
 ```bash
 curl -X POST http://localhost:8000/questions/ingest \
@@ -447,6 +479,7 @@ pytest --cov=app tests/
 - **[README_CRAWLER.md](README_CRAWLER.md)**: 爬虫详细使用说明
 - **[STREAMING_CRAWL.md](STREAMING_CRAWL.md)**: 流式处理架构技术说明
 - **[URL_FILTER_GUIDE.md](URL_FILTER_GUIDE.md)**: URL过滤规则使用指南
+- **[SINGLE_PAGE_CRAWL.md](SINGLE_PAGE_CRAWL.md)**: 单页爬取接口使用说明
 
 ## 项目结构
 
@@ -474,14 +507,18 @@ interview_agent/
 │   ├── test_url_scanner.py
 │   ├── test_sitemap_crawler.py
 │   ├── test_url_filter.py         # URL过滤测试
-│   └── test_page_chunking.py      # 页面分块测试
+│   ├── test_page_chunking.py      # 页面分块测试
+│   └── test_single_page_crawl.py  # 单页爬取测试
+├── examples/
+│   └── single_page_crawl_example.py  # 单页爬取示例
 ├── crawl_results/                 # 爬取结果存储目录
 ├── requirements.txt               # Python依赖
 ├── .env.template                  # 环境变量模板
 ├── README.md                      # 主文档
 ├── README_CRAWLER.md              # 爬虫文档
 ├── STREAMING_CRAWL.md             # 流式处理文档
-└── URL_FILTER_GUIDE.md            # URL过滤文档
+├── URL_FILTER_GUIDE.md            # URL过滤文档
+└── SINGLE_PAGE_CRAWL.md           # 单页爬取文档
 ```
 
 ## 许可证
