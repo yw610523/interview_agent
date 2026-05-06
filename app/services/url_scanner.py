@@ -107,6 +107,13 @@ class URLScanner:
         start_time = time.time()
 
         try:
+            # 检测是否为微信公众号文章
+            is_wechat = 'weixin.qq.com' in url or 'mp.weixin.qq.com' in url
+            if is_wechat:
+                logger.warning(f"检测到微信公众号文章: {url}")
+                logger.warning("微信公众号文章使用JavaScript动态渲染，HTTP请求可能无法获取完整内容")
+                logger.warning("建议: 使用浏览器访问该文章，复制完整内容后使用其他方式处理")
+            
             response = self._session.get(
                 url,
                 timeout=self.timeout,
@@ -138,6 +145,13 @@ class URLScanner:
                 # 提取文本内容
                 result.text_content = soup.get_text(separator='\n', strip=True)
                 result.word_count = len(result.text_content.split())
+                
+                # 微信公众号文章验证
+                if is_wechat and len(result.text_content) < 200:
+                    logger.error(f"微信公众号文章内容过短({len(result.text_content)}字符)，可能是JavaScript渲染导致")
+                    logger.error(f"标题: {result.title}")
+                    logger.error(f"建议手动复制文章内容或使用浏览器渲染工具")
+                    result.error = "微信公众号文章需要JavaScript渲染，请使用浏览器访问并手动复制内容"
             
             result.load_time = time.time() - start_time
 
