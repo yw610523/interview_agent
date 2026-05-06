@@ -1,4 +1,4 @@
 .env
 .pytest_cache
 *.pyc
-crawl_results/*
+app/crawl_results/*

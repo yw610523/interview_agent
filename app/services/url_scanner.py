@@ -53,6 +53,8 @@ class ScanResult:
             'word_count': self.word_count,
             'load_time': self.load_time,
             'error': self.error,
+            'html_content': self.html_content,
+            'text_content': self.text_content,
         }
 
 
@@ -122,7 +124,11 @@ class URLScanner:
 
             result.status_code = response.status_code
             result.content_type = response.headers.get('Content-Type', '')
-            
+            if 'text/html' in result.content_type.lower():
+                soup = BeautifulSoup(response.content, 'html.parser')
+                result.title = soup.title.string.strip() if soup.title and soup.title.string else None
+                result.text_content = soup.get_text(separator='\n', strip=True)  # 确保提取文本
+                result.word_count = len(result.text_content.split())
             # 确保使用正确的编码，优先使用响应头中的编码，否则使用 UTF-8
             response.encoding = response.apparent_encoding or 'utf-8'
             result.html_content = response.text
@@ -166,8 +172,16 @@ class URLScanner:
 
         # Extract meta tags
         for meta in soup.find_all('meta'):
-            name = meta.get('name', '').lower()
+            name = meta.get('name')
+            if isinstance(name, list):
+                name = name[0] if name else ''
+            if name is None:
+                name = ''
+            name = str(name).lower()
             content = meta.get('content', '')
+            if isinstance(content, list):
+                content = content[0] if content else ''
+            content = str(content)
             if name == 'description':
                 result.meta_description = content
             elif name == 'keywords':
@@ -184,7 +198,10 @@ class URLScanner:
         # Extract links
         parsed_base = urlparse(url)
         for link in soup.find_all('a', href=True):
-            href = link['href'].strip()
+            href = link['href']
+            if isinstance(href, list):
+                href = href[0] if href else ''
+            href = str(href).strip()
             if not href or href.startswith(('#', 'javascript:', 'mailto:', 'tel:')):
                 continue
 
@@ -201,19 +218,28 @@ class URLScanner:
 
         # Extract images
         for img in soup.find_all('img', src=True):
-            src = urljoin(url, img['src'].strip())
+            src = img['src']
+            if isinstance(src, list):
+                src = src[0] if src else ''
+            src = urljoin(url, str(src).strip())
             if src not in result.links['images']:
                 result.links['images'].append(src)
 
         # Extract scripts
         for script in soup.find_all('script', src=True):
-            src = urljoin(url, script['src'].strip())
+            src = script['src']
+            if isinstance(src, list):
+                src = src[0] if src else ''
+            src = urljoin(url, str(src).strip())
             if src not in result.links['scripts']:
                 result.links['scripts'].append(src)
 
         # Extract stylesheets
         for link in soup.find_all('link', rel='stylesheet', href=True):
-            href = urljoin(url, link['href'].strip())
+            href = link['href']
+            if isinstance(href, list):
+                href = href[0] if href else ''
+            href = urljoin(url, str(href).strip())
             if href not in result.links['stylesheets']:
                 result.links['stylesheets'].append(href)
 

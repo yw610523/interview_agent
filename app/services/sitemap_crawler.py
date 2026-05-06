@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 from .sitemap_parser import SitemapParser
 from .url_scanner import URLScanner, ScanResult
+from .url_filter import URLFilter
 from app.config.crawler_config import CrawlerConfig
 from app.config.crawler_config import CrawlerConfig
 
@@ -66,6 +67,7 @@ class SitemapCrawler:
         self._results: List[ScanResult] = []
         self._sitemap_parser: Optional[SitemapParser] = None
         self._url_scanner: Optional[URLScanner] = None
+        self._url_filter: Optional[URLFilter] = None
 
     @property
     def results(self) -> List[ScanResult]:
@@ -164,6 +166,7 @@ class SitemapCrawler:
         self,
         sitemap_url: Optional[str] = None,
         progress_callback: Optional[Callable[[ScanResult, int, int], None]] = None,
+        page_processed_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> List[ScanResult]:
         """
         开始爬取操作。
@@ -171,6 +174,7 @@ class SitemapCrawler:
         参数:
             sitemap_url: 可选的站点地图 URL（覆盖配置）
             progress_callback: 可选的进度更新回调函数
+            page_processed_callback: 可选的页面处理完成回调函数，每扫描完一个URL立即调用
 
         返回:
             ScanResult 对象列表
@@ -222,6 +226,20 @@ class SitemapCrawler:
         urls = self._sitemap_parser.parse()
         logger.info(f"在站点地图中找到 {len(urls)} 个 URL")
 
+        # 初始化URL过滤器并应用过滤规则
+        self._url_filter = URLFilter.from_config(self.config)
+        if self.config.url_include_patterns or self.config.url_exclude_patterns:
+            logger.info("应用URL过滤规则...")
+            original_count = len(urls)
+            urls = self._url_filter.filter_urls(urls)
+            filtered_count = original_count - len(urls)
+            if filtered_count > 0:
+                logger.info(f"URL过滤: 原始={original_count}, 过滤后={len(urls)}, 排除={filtered_count}")
+            else:
+                logger.info("所有URL都通过过滤规则")
+        else:
+            logger.info("未配置URL过滤规则，处理所有URL")
+
         # Apply max_urls limit
         if self.config.max_urls and len(urls) > self.config.max_urls:
             urls = urls[:self.config.max_urls]
@@ -248,6 +266,15 @@ class SitemapCrawler:
 
             if progress_callback:
                 progress_callback(result, i + 1, len(urls))
+
+            # 如果提供了页面处理回调，立即调用
+            if page_processed_callback and not result.error:
+                try:
+                    page_data = result.to_dict()
+                    page_processed_callback(page_data)
+                    logger.info(f"页面 {url} 已触发实时处理回调")
+                except Exception as e:
+                    logger.error(f"页面处理回调失败: {str(e)}")
 
             # Delay between requests
             if self.config.delay_between_requests > 0 and i < len(urls) - 1:

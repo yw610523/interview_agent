@@ -28,6 +28,8 @@ class CrawlerConfig:
         check_robots_txt: 是否检查 robots.txt
         save_results: 是否保存结果到文件
         verbose: 是否打印详细输出
+        url_include_patterns: URL包含模式列表（正则表达式），只爬取匹配的URL
+        url_exclude_patterns: URL排除模式列表（正则表达式），不爬取匹配的URL
     """
     sitemap_url: str = ""
     sitemap_path: str = ""
@@ -43,6 +45,8 @@ class CrawlerConfig:
     check_robots_txt: bool = True
     save_results: bool = True
     verbose: bool = True
+    url_include_patterns: list = field(default_factory=list)
+    url_exclude_patterns: list = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """将配置转换为字典。"""
@@ -85,9 +89,10 @@ def get_config_from_env() -> CrawlerConfig:
     从环境变量加载配置。
 
     返回:
-        包含环境变量值的 CrawlerConfig 实例
+        包含环境变量的值的 CrawlerConfig 实例
     """
     import os
+    import json
     from dotenv import load_dotenv
 
     load_dotenv()
@@ -111,6 +116,19 @@ def get_config_from_env() -> CrawlerConfig:
 
     if user_agent := os.getenv('CRAWLER_USER_AGENT'):
         config.user_agent = user_agent
+
+    # 从环境变量读取URL过滤规则
+    if include_patterns := os.getenv('CRAWLER_URL_INCLUDE_PATTERNS'):
+        try:
+            config.url_include_patterns = json.loads(include_patterns)
+        except json.JSONDecodeError as e:
+            logger.warning(f"解析CRAWLER_URL_INCLUDE_PATTERNS失败: {str(e)}")
+
+    if exclude_patterns := os.getenv('CRAWLER_URL_EXCLUDE_PATTERNS'):
+        try:
+            config.url_exclude_patterns = json.loads(exclude_patterns)
+        except json.JSONDecodeError as e:
+            logger.warning(f"解析CRAWLER_URL_EXCLUDE_PATTERNS失败: {str(e)}")
 
     return config
 

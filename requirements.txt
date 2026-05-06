@@ -11,3 +11,7 @@ python-dotenv
 pytest 
 httpx
 apscheduler  # 用于定时任务
+redis  # Redis 向量数据库
+openai  # OpenAI API
+langchain  # 大模型框架
+json-repair  # 用于修复损坏的JSON
