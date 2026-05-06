@@ -10,15 +10,10 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
-      },
-      '/questions': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-      '/crawl': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
       }
     }
+  },
+  optimizeDeps: {
+    include: ['ant-design-vue']
   }
 })

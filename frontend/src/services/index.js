@@ -3,22 +3,22 @@ import apiClient from './api'
 export const crawlerApi = {
   // 获取爬虫配置
   getConfig() {
-    return apiClient.get('/api/config')
+    return apiClient.get('/config')
   },
 
   // 更新爬虫配置
   updateConfig(config) {
-    return apiClient.put('/api/config', config)
+    return apiClient.put('/config', config)
   },
 
   // 获取定时任务配置
   getSchedulerConfig() {
-    return apiClient.get('/api/scheduler-config')
+    return apiClient.get('/scheduler-config')
   },
 
   // 更新定时任务配置
   updateSchedulerConfig(hour, minute) {
-    return apiClient.put(`/api/scheduler-config?hour=${hour}&minute=${minute}`)
+    return apiClient.put(`/scheduler-config?hour=${hour}&minute=${minute}`)
   },
 
   // 手动触发批量爬取

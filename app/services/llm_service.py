@@ -11,6 +11,9 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 from dotenv import load_dotenv
 
+logger = logging.getLogger(__name__)
+load_dotenv()
+
 # 尝试导入不同的大模型库
 try:
     from openai import OpenAI
@@ -25,10 +28,6 @@ try:
     JSON_REPAIR_AVAILABLE = True
 except ImportError:
     JSON_REPAIR_AVAILABLE = False
-    logger.warning("json-repair 未安装，将使用内置的JSON修复逻辑")
-
-logger = logging.getLogger(__name__)
-load_dotenv()
 
 
 @dataclass
@@ -493,21 +492,19 @@ URL: {url}
                     logger.info(f"LLM返回内容长度: {len(result)} 字符")
                     
                     questions = self._parse_response(result)
-                    
+                                
                     # 检查是否成功解析到问题
                     if questions:
                         parse_success = True
                     elif retry_count < max_retries - 1:
                         # 解析返回了空数组，可能是没有找到问题，也可能是解析失败
-                        # 检查是否是JSON解析错误导致的空结果
                         # 如果是解析错误，重试；否则认为确实没有问题
-                        # 这里简化处理：如果解析返回空，不重试（认为是没有问题）
                         parse_success = True
-                        logger.info(f"chunk {chunk_idx + 1} 未识别到问题（非解析错误）")
+                        logger.debug(f"chunk {chunk_idx + 1} 未识别到问题")
                     
                 except json.JSONDecodeError as e:
                     retry_count += 1
-                    logger.warning(f"chunk {chunk_idx + 1} JSON解析失败（第{retry_count}次）: {str(e)}，正在重试...")
+                    logger.warning(f"chunk {chunk_idx + 1} JSON解析失败（第{retry_count}/{max_retries}次重试）: {str(e)}")
                     import time
                     time.sleep(1.5 ** retry_count)  # 指数退避
                 except Exception as e:
@@ -519,7 +516,10 @@ URL: {url}
                 q.source_url = url
             
             all_questions.extend(questions)
-            logger.info(f"chunk {chunk_idx + 1} 识别出 {len(questions)} 个问题（重试 {retry_count} 次）")
+            if retry_count > 0:
+                logger.info(f"chunk {chunk_idx + 1} 识别出 {len(questions)} 个问题（经过 {retry_count} 次重试）")
+            else:
+                logger.info(f"chunk {chunk_idx + 1} 识别出 {len(questions)} 个问题")
         
         return all_questions
 
@@ -532,9 +532,9 @@ URL: {url}
             return []
         
         try:
-            # 清理响应文本，去除可能的 markdown 代码块标记
+            # 清理响应文本，去除可能的代码块标记
             cleaned_response = response.strip()
-            if cleaned_response.startswith("```json"):
+            if cleaned_response.startswith("``json"):
                 cleaned_response = cleaned_response[7:]
             if cleaned_response.endswith("```"):
                 cleaned_response = cleaned_response[:-3]
@@ -546,22 +546,33 @@ URL: {url}
 
             if start != -1 and end != -1:
                 json_str = cleaned_response[start:end]
-                logging.info(f"LLM返回内容: {json_str}")
-                # 尝试使用 json-repair 修复JSON
-                if JSON_REPAIR_AVAILABLE:
-                    try:
-                        repaired_json = repair_json(json_str)
-                        data = json.loads(repaired_json)
-                        logger.info("使用 json-repair 成功修复JSON")
-                    except Exception as e:
-                        logger.warning(f"json-repair 修复失败: {str(e)}，尝试内置修复")
-                        # 如果 json-repair 失败，使用内置修复
+                logging.debug(f"LLM返回JSON内容长度: {len(json_str)} 字符")
+                
+                # 尝试直接解析JSON（大多数情况下JSON是有效的）
+                try:
+                    data = json.loads(json_str)
+                    logger.debug("JSON解析成功（无需修复）")
+                except json.JSONDecodeError:
+                    # JSON格式有问题，尝试修复
+                    logger.debug("JSON格式异常，尝试修复...")
+                    
+                    # 优先使用 json-repair 修复
+                    if JSON_REPAIR_AVAILABLE:
+                        try:
+                            repaired_json = repair_json(json_str)
+                            data = json.loads(repaired_json)
+                            logger.info("使用 json-repair 成功修复JSON格式问题")
+                        except Exception as e:
+                            logger.warning(f"json-repair 修复失败: {str(e)}，尝试内置修复方法")
+                            # 如果 json-repair 失败，使用内置修复
+                            json_str = self._fix_json_format(json_str)
+                            data = json.loads(json_str)
+                            logger.info("使用内置方法成功修复JSON格式问题")
+                    else:
+                        # json-repair 不可用，直接使用内置修复
                         json_str = self._fix_json_format(json_str)
                         data = json.loads(json_str)
-                else:
-                    # 尝试修复常见的JSON格式问题
-                    json_str = self._fix_json_format(json_str)
-                    data = json.loads(json_str)
+                        logger.info("使用内置方法修复JSON格式问题")
 
                 questions = []
                 for item in data:
@@ -682,7 +693,10 @@ URL: {url}
                 try:
                     repaired_json = repair_json(json_content)
                     data = json.loads(repaired_json)
-                    logger.info(f"使用 json-repair 成功从截断的JSON中恢复了 {len(data)} 个问题")
+                    if len(data) > 0:
+                        logger.info(f"使用 json-repair 从截断JSON中成功恢复 {len(data)} 个问题")
+                    else:
+                        logger.debug("使用 json-repair 解析成功但未提取到问题")
                         
                     for item in data:
                         question = ParsedQuestion(
@@ -699,8 +713,7 @@ URL: {url}
                         
                     return questions
                 except Exception as e:
-                    logger.warning(f"json-repair 恢复失败: {str(e)}，使用内置方法")
-                    logger.debug(f"尝试修复的JSON内容:\n{json_content}")
+                    logger.debug(f"json-repair 恢复失败: {str(e)}，尝试内置方法")
             
             # 如果 json-repair 不可用或失败，使用原有逻辑
             # 尝试找到最后一个完整的对象结束位置 }
@@ -742,7 +755,10 @@ URL: {url}
                     
                 try:
                     data = json.loads(truncated_json)
-                    logger.info(f"成功从截断的JSON中恢复了 {len(data)} 个问题")
+                    if len(data) > 0:
+                        logger.info(f"从截断JSON中成功恢复 {len(data)} 个问题")
+                    else:
+                        logger.debug("截断JSON恢复成功但未提取到问题")
                         
                     for item in data:
                         question = ParsedQuestion(
@@ -759,7 +775,7 @@ URL: {url}
                         
                     return questions
                 except json.JSONDecodeError as e:
-                    logger.warning(f"截断JSON恢复失败: {str(e)}")
+                    logger.debug(f"截断JSON恢复失败: {str(e)}")
             else:
                 logger.warning("未找到完整的JSON对象")
             

@@ -1,10 +1,14 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, HttpUrl
 from typing import List, Optional, Dict, Any
 import uvicorn
 import logging
 from pathlib import Path
 import json
+import asyncio
+from queue import Queue, Empty
+from threading import Thread
 
 # 导入爬虫相关模块
 from app.services.sitemap_crawler import SitemapCrawler
@@ -33,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 # 全局变量存储最近一次爬取结果
 last_crawl_result: Optional[Dict[str, Any]] = None
+
+# SSE日志队列（用于单页爬取的实时日志推送）
+sse_log_queues: Dict[str, Queue] = {}
 
 # 初始化服务
 llm_service = LLMService()
@@ -67,7 +74,7 @@ class SearchResult(BaseModel):
     total: int
 
 
-@app.post("/questions/ingest", summary="接收并存储面试题")
+@app.post("/api/questions/ingest", summary="接收并存储面试题")
 async def ingest_question(questions: List[InterviewQuestion]):
     """
     接收来自爬虫或大模型分析后的面试题列表，并存入向量数据库
@@ -228,7 +235,7 @@ def run_crawler() -> Dict[str, Any]:
         return {"status": "error", "message": str(e)}
 
 
-@app.get("/crawl/run", summary="手动触发爬虫任务")
+@app.get("/api/crawl/run", summary="手动触发爬虫任务")
 async def trigger_crawl():
     """
     手动触发爬虫任务
@@ -240,7 +247,7 @@ async def trigger_crawl():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/crawl/status", summary="获取爬虫状态")
+@app.get("/api/crawl/status", summary="获取爬虫状态")
 async def get_crawl_status():
     """
     获取爬虫状态（包括调度配置、下次运行时间、上次爬取结果）
@@ -322,7 +329,7 @@ async def get_crawl_status():
     return status_info
 
 
-@app.get("/questions/search", summary="搜索面试题")
+@app.get("/api/questions/search", summary="搜索面试题")
 async def search_questions(
     query: str,
     limit: int = Query(10, ge=1, le=50),
@@ -360,7 +367,7 @@ async def search_questions(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/questions/count", summary="获取面试题总数")
+@app.get("/api/questions/count", summary="获取面试题总数")
 async def get_question_count():
     """
     获取向量数据库中面试题的总数
@@ -373,7 +380,7 @@ async def get_question_count():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/questions/generate-batch", summary="批量生成面试题")
+@app.get("/api/questions/generate-batch", summary="批量生成面试题")
 async def generate_batch_questions(
     count: int = Query(10, ge=1, le=50),
     difficulty: Optional[str] = Query(None),
@@ -442,7 +449,7 @@ async def generate_batch_questions(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/questions/generate", summary="使用大模型生成答案")
+@app.post("/api/questions/generate", summary="使用大模型生成答案")
 async def generate_answer(question: str):
     """
     使用大模型为给定问题生成答案
@@ -455,7 +462,7 @@ async def generate_answer(question: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/questions/{question_id}", summary="获取单个面试题详情")
+@app.get("/api/questions/{question_id}", summary="获取单个面试题详情")
 async def get_question(question_id: str):
     """
     根据 ID 获取面试题详情
@@ -475,7 +482,7 @@ async def get_question(question_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/questions/{question_id}", summary="删除面试题")
+@app.delete("/api/questions/{question_id}", summary="删除面试题")
 async def delete_question(question_id: str):
     """
     删除指定的面试题
@@ -495,7 +502,7 @@ async def delete_question(question_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/questions", summary="获取所有面试题")
+@app.get("/api/questions", summary="获取所有面试题")
 async def get_all_questions(
     limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0)
 ):
@@ -521,7 +528,7 @@ async def get_all_questions(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/debug/vector-status", summary="调试：查看向量数据库状态")
+@app.get("/api/debug/vector-status", summary="调试：查看向量数据库状态")
 async def debug_vector_status():
     """
     调试接口：查看向量数据库的状态，包括索引信息和样本数据
@@ -567,7 +574,7 @@ async def debug_vector_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/debug/reset-index", summary="调试：重置向量索引")
+@app.post("/api/debug/reset-index", summary="调试：重置向量索引")
 async def reset_vector_index():
     """
     调试接口：删除旧索引和所有数据，以便重新创建
@@ -599,10 +606,133 @@ async def reset_vector_index():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/debug/merge-duplicates", summary="调试：合并重复问题")
+async def merge_duplicate_questions(
+    similarity_threshold: float = Query(0.85, ge=0.0, le=1.0, description="相似度阈值"),
+    dry_run: bool = Query(False, description="是否仅模拟运行（不实际合并）")
+):
+    """
+    调试接口：检测并合并相似问题
+    
+    参数:
+        similarity_threshold: 相似度阈值（0-1），默认0.85
+        dry_run: 是否仅模拟运行，不实际合并
+    
+    返回:
+        合并统计信息
+    """
+    try:
+        if not vector_service.redis_client:
+            raise HTTPException(status_code=500, detail="Redis未连接")
+        
+        logger.info(f"开始检测重复问题（相似度阈值: {similarity_threshold}, 模拟运行: {dry_run}）")
+        
+        # 获取所有问题
+        all_questions = vector_service.get_all()
+        total_questions = len(all_questions)
+        
+        if total_questions == 0:
+            return {
+                "status": "success",
+                "message": "没有需要处理的问题",
+                "total_questions": 0,
+                "merged_count": 0,
+                "details": []
+            }
+        
+        logger.info(f"共有 {total_questions} 个问题需要检查")
+        
+        # 统计信息
+        merged_count = 0
+        details = []
+        processed_ids = set()
+        
+        # 遍历所有问题，检查是否有相似问题
+        for i, question in enumerate(all_questions):
+            if question['id'] in processed_ids:
+                continue
+            
+            # 每10个问题打印进度
+            if (i + 1) % 10 == 0:
+                logger.info(f"进度: {i + 1}/{total_questions}")
+            
+            # 查找相似问题（排除自己）
+            similar = vector_service._find_most_similar_question(
+                question['title'], 
+                similarity_threshold
+            )
+            
+            if similar and similar['id'] != question['id'] and similar['id'] not in processed_ids:
+                # 找到相似问题
+                detail = {
+                    "original": {
+                        "id": question['id'],
+                        "title": question['title'],
+                        "source_url": question['source_url']
+                    },
+                    "similar": {
+                        "id": similar['id'],
+                        "title": similar['title'],
+                        "score": similar['score']
+                    }
+                }
+                
+                if not dry_run:
+                    # 实际执行合并
+                    # 构建 VectorRecord
+                    from app.services.vector_service import VectorRecord
+                    new_question = VectorRecord(
+                        id="",
+                        title=question['title'],
+                        answer=question['answer'],
+                        source_url=question['source_url'],
+                        tags=question['tags'],
+                        importance_score=question['importance_score'],
+                        difficulty=question['difficulty'],
+                        category=question['category']
+                    )
+                    
+                    success = vector_service._merge_into_existing_question(
+                        similar['id'], 
+                        new_question
+                    )
+                    
+                    if success:
+                        merged_count += 1
+                        processed_ids.add(question['id'])
+                        detail["action"] = "merged"
+                        detail["message"] = f"已合并到: {similar['title']}"
+                    else:
+                        detail["action"] = "failed"
+                        detail["message"] = "合并失败"
+                else:
+                    detail["action"] = "would_merge"
+                    detail["message"] = f"将合并到: {similar['title']}"
+                
+                details.append(detail)
+        
+        result = {
+            "status": "success",
+            "message": "重复问题检测完成",
+            "total_questions": total_questions,
+            "merged_count": merged_count if not dry_run else len(details),
+            "similarity_threshold": similarity_threshold,
+            "dry_run": dry_run,
+            "details": details[:50]  # 最多返回50条详细信息
+        }
+        
+        logger.info(f"重复问题处理完成: 总计 {total_questions}, 合并 {merged_count}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Merge duplicates error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 
-@app.post("/crawl/single-page", summary="智能爬取单个页面")
+
+
+@app.post("/api/crawl/single-page", summary="智能爬取单个页面")
 async def crawl_single_page(url: str):
     """
     智能爬取单个页面，识别其中的面试问题并存入向量数据库
@@ -613,10 +743,13 @@ async def crawl_single_page(url: str):
     try:
         from app.services.url_scanner import URLScanner
         from app.services.vector_service import VectorRecord
+        import time
         
+        start_time = time.time()
         logger.info(f"开始爬取单个页面: {url}")
         
         # 1. 扫描页面
+        logger.info("步骤1: 正在扫描页面...")
         scanner = URLScanner()
         scan_result = scanner.scan(url)
         
@@ -636,6 +769,9 @@ async def crawl_single_page(url: str):
         # 3. 使用大模型解析页面内容
         inserted_count = 0
         parsed_questions = []
+        processing_steps = [
+            {"step": 1, "message": "页面扫描完成", "progress": 20},
+        ]
         
         def on_question_found(questions):
             nonlocal inserted_count
@@ -657,9 +793,18 @@ async def crawl_single_page(url: str):
             logger.info(f"识别到 {len(questions)} 个问题，已插入 {count} 个到向量数据库")
         
         # 调用大模型处理单个页面
+        logger.info("步骤2: 正在使用AI识别面试问题...")
+        processing_steps.append({"step": 2, "message": "正在分析页面内容...", "progress": 40})
+        
         parsed_questions = llm_service.parse_crawl_results(
             [page_data], on_question_found=on_question_found
         )
+        
+        processing_steps.append({"step": 3, "message": "问题识别完成", "progress": 80})
+        processing_steps.append({"step": 4, "message": "正在存入向量数据库...", "progress": 90})
+        
+        end_time = time.time()
+        total_time = end_time - start_time
         
         result = {
             "status": "success",
@@ -670,6 +815,8 @@ async def crawl_single_page(url: str):
             "inserted_questions": inserted_count,
             "word_count": scan_result.word_count,
             "load_time": scan_result.load_time,
+            "total_processing_time": round(total_time, 2),
+            "processing_steps": processing_steps,
         }
         
         logger.info(f"单页爬取完成: {result}")
@@ -680,6 +827,218 @@ async def crawl_single_page(url: str):
     except Exception as e:
         logger.error(f"单页爬取失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/crawl/single-page/stream", summary="单页爬取实时日志流")
+async def crawl_single_page_stream(url: str):
+    """
+    SSE流式接口：实时推送单页爬取的日志和进度
+    
+    参数:
+        url: 要爬取的页面URL
+    """
+    from app.services.url_scanner import URLScanner
+    from app.services.vector_service import VectorRecord
+    import time
+    
+    # 创建唯一的会话ID
+    import uuid
+    session_id = str(uuid.uuid4())
+    
+    # 为此会话创建日志队列
+    log_queue = Queue()
+    sse_log_queues[session_id] = log_queue
+    
+    async def event_generator():
+        try:
+            start_time = time.time()
+            
+            # 发送初始状态
+            yield f"data: {json.dumps({'type': 'start', 'message': '开始爬取', 'progress': 0})}\n\n"
+            
+            # 定义日志回调函数
+            def log_callback(message: str, progress: int, step: str = "info"):
+                log_data = {
+                    "type": "log",
+                    "message": message,
+                    "progress": progress,
+                    "step": step,
+                    "timestamp": time.time()
+                }
+                log_queue.put(json.dumps(log_data))
+            
+            # 在后台线程中执行爬取任务
+            def run_crawl():
+                try:
+                    log_callback("正在扫描页面...", 10, "scanning")
+                    
+                    # 1. 扫描页面
+                    scanner = URLScanner()
+                    scan_result = scanner.scan(url)
+                    
+                    if scan_result.error:
+                        log_callback(f"页面扫描失败: {scan_result.error}", 0, "error")
+                        log_queue.put("ERROR")
+                        return
+                    
+                    log_callback(f"页面扫描成功: {scan_result.title}", 20, "scanned")
+                    log_callback(f"内容长度: {len(scan_result.text_content or '')} 字符", 25, "info")
+                    
+                    # 2. 构建页面数据
+                    page_data = {
+                        "url": url,
+                        "title": scan_result.title or "",
+                        "text_content": scan_result.text_content or "",
+                        "html_content": scan_result.html_content or "",
+                    }
+                    
+                    # 3. 使用大模型解析
+                    inserted_count = 0
+                    
+                    def on_question_found(questions):
+                        nonlocal inserted_count
+                        records = []
+                        for q in questions:
+                            record = VectorRecord(
+                                id="",
+                                title=q.title,
+                                answer=q.answer,
+                                source_url=q.source_url,
+                                tags=q.tags,
+                                importance_score=q.importance_score,
+                                difficulty=q.difficulty,
+                                category=q.category,
+                            )
+                            records.append(record)
+                        count = vector_service.insert_questions(records)
+                        inserted_count += count
+                        log_callback(f"识别到 {len(questions)} 个问题，已插入 {count} 个", 75, "inserting")
+                    
+                    log_callback("正在使用AI识别面试问题...", 30, "analyzing")
+                    
+                    # 临时重定向日志输出到SSE（只推送重要日志）
+                    original_handlers = logger.handlers.copy()
+                    
+                    class SSELogHandler(logging.Handler):
+                        def emit(self, record):
+                            # 只推送 WARNING 及以上级别的日志，以及特定的 INFO 日志
+                            if record.levelno < logging.WARNING:
+                                # 对于 INFO 级别，只推送关键信息
+                                log_message = self.format(record)
+                                # 只推送包含关键信息的日志
+                                important_keywords = [
+                                    "页面", "chunk", "识别出", "问题", 
+                                    "插入", "完成", "失败", "错误"
+                                ]
+                                if any(keyword in log_message for keyword in important_keywords):
+                                    # 根据日志内容判断进度
+                                    if "chunk" in log_message.lower() and "识别出" in log_message:
+                                        log_callback(log_message, 60, "processing")
+                                    elif "页面" in log_message and "处理" in log_message:
+                                        log_callback(log_message, 40, "processing")
+                                    # 其他INFO日志不推送到前端，避免干扰
+                            else:
+                                # WARNING 和 ERROR 级别直接推送
+                                log_message = self.format(record)
+                                if record.levelno >= logging.ERROR:
+                                    log_callback(log_message, 0, "error")
+                                else:
+                                    log_callback(log_message, 50, "warning")
+                    
+                    sse_handler = SSELogHandler()
+                    sse_handler.setFormatter(logging.Formatter('%(message)s'))
+                    logger.addHandler(sse_handler)
+                    
+                    try:
+                        parsed_questions = llm_service.parse_crawl_results(
+                            [page_data], on_question_found=on_question_found
+                        )
+                    finally:
+                        logger.removeHandler(sse_handler)
+                    
+                    log_callback(f"问题识别完成，共识别 {len(parsed_questions)} 个问题", 80, "completed")
+                    log_callback("正在存入向量数据库...", 90, "finalizing")
+                    
+                    end_time = time.time()
+                    total_time = end_time - start_time
+                    
+                    result = {
+                        "status": "success",
+                        "message": "页面爬取完成",
+                        "url": url,
+                        "title": scan_result.title,
+                        "parsed_questions": len(parsed_questions),
+                        "inserted_questions": inserted_count,
+                        "word_count": scan_result.word_count,
+                        "load_time": scan_result.load_time,
+                        "total_processing_time": round(total_time, 2),
+                    }
+                    
+                    log_callback(f"爬取完成！总耗时: {round(total_time, 2)}秒", 100, "finished")
+                    
+                    # 发送最终结果
+                    final_data = {
+                        "type": "complete",
+                        "result": result
+                    }
+                    log_queue.put(json.dumps(final_data))
+                    
+                except Exception as e:
+                    error_msg = f"爬取失败: {str(e)}"
+                    log_callback(error_msg, 0, "error")
+                    log_queue.put("ERROR")
+                    logger.error(error_msg)
+            
+            # 启动后台线程
+            crawl_thread = Thread(target=run_crawl, daemon=True)
+            crawl_thread.start()
+            
+            # 持续从队列读取并发送SSE事件
+            while True:
+                try:
+                    # 非阻塞方式获取消息
+                    message = log_queue.get(timeout=1)
+                    
+                    if message == "ERROR":
+                        yield f"data: {json.dumps({'type': 'error', 'message': '爬取过程中发生错误'})}\n\n"
+                        break
+                    
+                    yield f"data: {message}\n\n"
+                    
+                    # 检查是否是完成消息
+                    if isinstance(message, str):
+                        try:
+                            data = json.loads(message)
+                            if data.get("type") == "complete":
+                                break
+                        except:
+                            pass
+                    
+                except Empty:
+                    # 检查线程是否结束
+                    if not crawl_thread.is_alive():
+                        break
+                    continue
+            
+            # 清理队列
+            if session_id in sse_log_queues:
+                del sse_log_queues[session_id]
+        
+        except asyncio.CancelledError:
+            # 客户端断开连接
+            if session_id in sse_log_queues:
+                del sse_log_queues[session_id]
+            raise
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # 禁用Nginx缓冲
+        }
+    )
 
 
 @app.get("/api/config", summary="获取爬虫配置")

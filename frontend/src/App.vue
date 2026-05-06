@@ -21,6 +21,9 @@
             <a-menu-item key="/questions">
               <router-link to="/questions">面试题生成</router-link>
             </a-menu-item>
+            <a-menu-item key="/settings">
+              <router-link to="/settings">系统设置</router-link>
+            </a-menu-item>
           </a-menu>
         </a-layout-header>
         

@@ -4,96 +4,6 @@
       <!-- 批量爬取 -->
       <a-tab-pane key="batch" tab="批量爬取">
         <a-row :gutter="[24, 24]">
-          <!-- 配置表单 -->
-          <a-col :span="24">
-            <a-card title="⚙️ 爬虫配置" :bordered="false">
-              <a-form
-                :model="configForm"
-                :label-col="{ span: 6 }"
-                :wrapper-col="{ span: 18 }"
-              >
-                <a-form-item label="Sitemap URL" required>
-                  <a-input v-model:value="configForm.sitemap_url" placeholder="例如: javaguide.cn" />
-                </a-form-item>
-
-                <a-form-item label="超时时间(秒)">
-                  <a-input-number v-model:value="configForm.timeout" :min="10" :max="120" />
-                </a-form-item>
-
-                <a-form-item label="最大URL数量">
-                  <a-input-number v-model:value="configForm.max_urls" :min="1" placeholder="留空表示无限制" />
-                </a-form-item>
-
-                <a-form-item label="请求间隔(秒)">
-                  <a-input-number v-model:value="configForm.delay_between_requests" :min="0" :max="10" :step="0.1" />
-                </a-form-item>
-
-                <a-form-item label="输出目录">
-                  <a-input v-model:value="configForm.output_dir" />
-                </a-form-item>
-
-                <a-form-item label="User Agent">
-                  <a-textarea v-model:value="configForm.user_agent" :rows="2" />
-                </a-form-item>
-
-                <a-form-item label="URL包含规则">
-                  <a-select
-                    v-model:value="configForm.url_include_patterns"
-                    mode="tags"
-                    placeholder="输入URL包含模式，如: /docs/"
-                    style="width: 100%"
-                  />
-                </a-form-item>
-
-                <a-form-item label="URL排除规则">
-                  <a-select
-                    v-model:value="configForm.url_exclude_patterns"
-                    mode="tags"
-                    placeholder="输入URL排除模式，如: /admin/"
-                    style="width: 100%"
-                  />
-                </a-form-item>
-
-                <a-form-item :wrapper-col="{ offset: 6 }">
-                  <a-space>
-                    <a-button type="primary" @click="saveConfig" :loading="saving">
-                      保存配置
-                    </a-button>
-                    <a-button @click="loadConfig">
-                      重置
-                    </a-button>
-                  </a-space>
-                </a-form-item>
-              </a-form>
-            </a-card>
-          </a-col>
-
-          <!-- 定时任务配置 -->
-          <a-col :span="24">
-            <a-card title="⏰ 定时任务配置" :bordered="false">
-              <a-form layout="inline">
-                <a-form-item label="执行时间">
-                  <a-time-picker
-                    v-model:value="schedulerTime"
-                    format="HH:mm"
-                    placeholder="选择时间"
-                  />
-                </a-form-item>
-                <a-form-item>
-                  <a-button type="primary" @click="saveSchedulerConfig" :loading="savingScheduler">
-                    保存定时配置
-                  </a-button>
-                </a-form-item>
-              </a-form>
-              <a-alert
-                message="注意：修改定时配置后需要重启服务才能生效"
-                type="info"
-                show-icon
-                style="margin-top: 12px;"
-              />
-            </a-card>
-          </a-col>
-
           <!-- 操作按钮 -->
           <a-col :span="24">
             <a-card :bordered="false">
@@ -160,9 +70,50 @@
 
               <a-divider />
 
+              <!-- 处理状态提示 -->
+              <a-alert
+                v-if="singlePageProcessing"
+                message="正在处理中..."
+                type="info"
+                show-icon
+              >
+                <template #description>
+                  <div>{{ processingMessage }}</div>
+                  <a-progress 
+                    v-if="processingProgress > 0" 
+                    :percent="processingProgress" 
+                    status="active" 
+                    :stroke-color="{ from: '#108ee9', to: '#87d068' }"
+                  />
+                </template>
+              </a-alert>
+
+              <!-- 实时日志显示区域 -->
+              <a-card 
+                v-if="realtimeLogs.length > 0 || singlePageProcessing" 
+                title="📋 实时处理日志" 
+                :bordered="false" 
+                style="margin-top: 16px; background: #f5f5f5;"
+              >
+                <div class="log-container">
+                  <div 
+                    v-for="(log, index) in realtimeLogs" 
+                    :key="index" 
+                    class="log-item"
+                    :class="`log-${log.step}`"
+                  >
+                    <span class="log-time">{{ formatLogTime(log.timestamp) }}</span>
+                    <span class="log-message">{{ log.message }}</span>
+                  </div>
+                  <div v-if="singlePageProcessing && realtimeLogs.length === 0" class="log-placeholder">
+                    等待处理开始...
+                  </div>
+                </div>
+              </a-card>
+
               <!-- 单页爬取结果 -->
               <a-alert
-                v-if="singlePageResult"
+                v-if="singlePageResult && !singlePageProcessing"
                 :message="`爬取完成！识别到 ${singlePageResult.parsed_questions} 个问题，已入库 ${singlePageResult.inserted_questions} 个`"
                 type="success"
                 show-icon
@@ -194,28 +145,10 @@
 import { ref, onMounted } from 'vue'
 import { crawlerApi } from '../services'
 import { message } from 'ant-design-vue'
-import dayjs from 'dayjs'
 
 const activeTab = ref('batch')
 
-// 配置表单
-const configForm = ref({
-  sitemap_url: '',
-  timeout: 30,
-  max_urls: null,
-  delay_between_requests: 0.5,
-  output_dir: './crawl_results',
-  user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-  url_include_patterns: [],
-  url_exclude_patterns: []
-})
-
-// 定时任务时间
-const schedulerTime = ref(null)
-
 // 状态
-const saving = ref(false)
-const savingScheduler = ref(false)
 const crawling = ref(false)
 const crawlStatus = ref(null)
 
@@ -223,61 +156,11 @@ const crawlStatus = ref(null)
 const singlePageUrl = ref('')
 const singlePageLoading = ref(false)
 const singlePageResult = ref(null)
-
-// 加载配置
-const loadConfig = async () => {
-  try {
-    const res = await crawlerApi.getConfig()
-    if (res.status === 'success') {
-      configForm.value = res.config
-    }
-  } catch (error) {
-    message.error('加载配置失败')
-    console.error(error)
-  }
-}
-
-// 保存配置
-const saveConfig = async () => {
-  if (!configForm.value.sitemap_url) {
-    message.warning('请输入Sitemap URL')
-    return
-  }
-
-  saving.value = true
-  try {
-    const res = await crawlerApi.updateConfig(configForm.value)
-    if (res.status === 'success') {
-      message.success('配置保存成功')
-    }
-  } catch (error) {
-    message.error('保存配置失败')
-    console.error(error)
-  } finally {
-    saving.value = false
-  }
-}
-
-// 保存定时配置
-const saveSchedulerConfig = async () => {
-  if (!schedulerTime.value) {
-    message.warning('请选择执行时间')
-    return
-  }
-
-  savingScheduler.value = true
-  try {
-    const hour = schedulerTime.value.hour()
-    const minute = schedulerTime.value.minute()
-    const res = await crawlerApi.updateSchedulerConfig(hour, minute)
-    message.success(res.message)
-  } catch (error) {
-    message.error('保存定时配置失败')
-    console.error(error)
-  } finally {
-    savingScheduler.value = false
-  }
-}
+const singlePageProcessing = ref(false)
+const processingMessage = ref('')
+const processingProgress = ref(0)
+const realtimeLogs = ref([])
+let eventSource = null
 
 // 触发批量爬取
 const triggerCrawl = async () => {
@@ -306,7 +189,14 @@ const loadCrawlStatus = async () => {
   }
 }
 
-// 单页爬取
+// 格式化日志时间
+const formatLogTime = (timestamp) => {
+  if (!timestamp) return ''
+  const date = new Date(timestamp * 1000)
+  return date.toLocaleTimeString('zh-CN', { hour12: false })
+}
+
+// 单页爬取（使用SSE实时日志）
 const crawlSinglePage = async () => {
   if (!singlePageUrl.value) {
     message.warning('请输入页面URL')
@@ -315,23 +205,90 @@ const crawlSinglePage = async () => {
 
   singlePageLoading.value = true
   singlePageResult.value = null
+  singlePageProcessing.value = true
+  processingMessage.value = '正在初始化...'
+  processingProgress.value = 0
+  realtimeLogs.value = []
+  
+  // 关闭之前的连接
+  if (eventSource) {
+    eventSource.close()
+  }
 
   try {
-    const res = await crawlerApi.crawlSinglePage(singlePageUrl.value)
-    if (res.status === 'success') {
-      singlePageResult.value = res
-      message.success(`爬取成功！识别到 ${res.parsed_questions} 个问题`)
+    // 创建SSE连接
+    const encodedUrl = encodeURIComponent(singlePageUrl.value)
+    eventSource = new EventSource(`/api/crawl/single-page/stream?url=${encodedUrl}`)
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        
+        if (data.type === 'start') {
+          processingMessage.value = data.message
+          processingProgress.value = data.progress
+        } else if (data.type === 'log') {
+          // 添加实时日志
+          realtimeLogs.value.push({
+            message: data.message,
+            progress: data.progress,
+            step: data.step,
+            timestamp: data.timestamp
+          })
+          
+          // 更新进度和消息
+          processingProgress.value = data.progress
+          processingMessage.value = data.message
+          
+          // 自动滚动到底部
+          setTimeout(() => {
+            const logContainer = document.querySelector('.log-container')
+            if (logContainer) {
+              logContainer.scrollTop = logContainer.scrollHeight
+            }
+          }, 100)
+        } else if (data.type === 'complete') {
+          // 处理完成
+          singlePageResult.value = data.result
+          message.success(`爬取成功！识别到 ${data.result.parsed_questions} 个问题`)
+          
+          // 延迟隐藏处理状态
+          setTimeout(() => {
+            singlePageProcessing.value = false
+          }, 1000)
+          
+          // 关闭SSE连接
+          eventSource.close()
+          eventSource = null
+        } else if (data.type === 'error') {
+          message.error(data.message || '爬取失败')
+          singlePageProcessing.value = false
+          eventSource.close()
+          eventSource = null
+        }
+      } catch (e) {
+        console.error('解析SSE消息失败:', e)
+      }
     }
+    
+    eventSource.onerror = (error) => {
+      console.error('SSE连接错误:', error)
+      message.error('实时连接失败，请重试')
+      singlePageProcessing.value = false
+      eventSource.close()
+      eventSource = null
+    }
+    
   } catch (error) {
     message.error('单页爬取失败')
     console.error(error)
+    singlePageProcessing.value = false
   } finally {
     singlePageLoading.value = false
   }
 }
 
 onMounted(() => {
-  loadConfig()
   loadCrawlStatus()
 })
 </script>
@@ -340,5 +297,97 @@ onMounted(() => {
 .crawler-view {
   max-width: 1200px;
   margin: 0 auto;
+}
+
+.log-container {
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 12px;
+  background: #1e1e1e;
+  border-radius: 4px;
+}
+
+.log-item {
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  border-left: 3px solid transparent;
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.log-scanning {
+  border-left-color: #1890ff;
+  background: rgba(24, 144, 255, 0.1);
+}
+
+.log-scanned {
+  border-left-color: #52c41a;
+  background: rgba(82, 196, 26, 0.1);
+}
+
+.log-analyzing,
+.log-processing {
+  border-left-color: #faad14;
+  background: rgba(250, 173, 20, 0.1);
+}
+
+.log-inserting,
+.log-finalizing {
+  border-left-color: #722ed1;
+  background: rgba(114, 46, 209, 0.1);
+}
+
+.log-completed,
+.log-finished {
+  border-left-color: #52c41a;
+  background: rgba(82, 196, 26, 0.15);
+  font-weight: bold;
+}
+
+.log-error {
+  border-left-color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.1);
+  color: #ff4d4f;
+}
+
+.log-info {
+  border-left-color: #d9d9d9;
+  background: rgba(217, 217, 217, 0.05);
+}
+
+.log-warning {
+  border-left-color: #faad14;
+  background: rgba(250, 173, 20, 0.15);
+  color: #faad14;
+}
+
+.log-time {
+  color: #8c8c8c;
+  margin-right: 12px;
+  font-size: 12px;
+}
+
+.log-message {
+  color: #d9d9d9;
+}
+
+.log-placeholder {
+  color: #8c8c8c;
+  text-align: center;
+  padding: 20px;
+  font-style: italic;
 }
 </style>

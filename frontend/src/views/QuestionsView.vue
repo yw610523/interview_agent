@@ -20,11 +20,9 @@
                 placeholder="全部"
                 style="width: 120px;"
                 allow-clear
-              >
-                <a-select-option value="easy">简单</a-select-option>
-                <a-select-option value="medium">中等</a-select-option>
-                <a-select-option value="hard">困难</a-select-option>
-              </a-select>
+                :options="difficultyOptions"
+                @change="handleDifficultyChange"
+              />
             </a-form-item>
 
             <a-form-item label="分类">
@@ -93,9 +91,7 @@
               </template>
 
               <div class="answer-content">
-                <div style="white-space: pre-wrap; line-height: 1.8;">
-                  {{ question.answer }}
-                </div>
+                <MarkdownRenderer :content="question.answer" />
                 
                 <a-divider />
                 
@@ -130,15 +126,23 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { questionApi } from '../services'
 import { message } from 'ant-design-vue'
+import MarkdownRenderer from '../components/MarkdownRenderer.vue'
 
 // 生成配置
 const questionCount = ref(10)
-const difficulty = ref(null)
+const difficulty = ref(undefined)
 const category = ref('')
 const tags = ref([])
+
+// 难度选项
+const difficultyOptions = [
+  { value: 'easy', label: '简单' },
+  { value: 'medium', label: '中等' },
+  { value: 'hard', label: '困难' }
+]
 
 // 状态
 const generating = ref(false)
@@ -173,6 +177,17 @@ const generateQuestions = async () => {
     generating.value = false
   }
 }
+
+// 难度选择变化处理
+const handleDifficultyChange = (value) => {
+  console.log('难度选择变化:', value)
+  console.log('当前difficulty值:', difficulty.value)
+}
+
+// 监听difficulty变化
+watch(difficulty, (newVal, oldVal) => {
+  console.log('difficulty从', oldVal, '变为', newVal)
+})
 
 // 展开所有答案
 const expandAll = () => {
@@ -211,5 +226,10 @@ const collapseAll = () => {
 
 :deep(.ant-collapse-content-box) {
   background-color: #fff;
+}
+
+/* 确保下拉菜单不被遮挡 */
+:deep(.ant-select-dropdown) {
+  z-index: 9999 !important;
 }
 </style>

@@ -12,4 +12,7 @@ app.use(pinia)
 app.use(router)
 app.use(Antd)
 
+// 确保Ant Design Vue正确注册
+console.log('Ant Design Vue version:', Antd.version)
+
 app.mount('#app')

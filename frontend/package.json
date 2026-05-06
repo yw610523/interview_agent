@@ -9,13 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.3.11",
-    "vue-router": "^4.2.5",
-    "axios": "^1.6.2",
-    "pinia": "^2.1.7",
-    "ant-design-vue": "^4.0.0",
     "@ant-design/icons-vue": "^7.0.1",
-    "dayjs": "^1.11.10"
+    "ant-design-vue": "^4.0.0",
+    "axios": "^1.6.2",
+    "dayjs": "^1.11.10",
+    "highlight.js": "^11.11.1",
+    "markdown-it": "^14.1.1",
+    "pinia": "^2.1.7",
+    "vue": "^3.3.11",
+    "vue-router": "^4.2.5"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^4.5.2",

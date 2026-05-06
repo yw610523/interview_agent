@@ -124,14 +124,21 @@ class URLScanner:
 
             result.status_code = response.status_code
             result.content_type = response.headers.get('Content-Type', '')
-            if 'text/html' in result.content_type.lower():
-                soup = BeautifulSoup(response.content, 'html.parser')
-                result.title = soup.title.string.strip() if soup.title and soup.title.string else None
-                result.text_content = soup.get_text(separator='\n', strip=True)  # 确保提取文本
-                result.word_count = len(result.text_content.split())
+            
             # 确保使用正确的编码，优先使用响应头中的编码，否则使用 UTF-8
             response.encoding = response.apparent_encoding or 'utf-8'
             result.html_content = response.text
+            
+            if 'text/html' in result.content_type.lower():
+                soup = BeautifulSoup(response.content, 'html.parser')
+                
+                # 智能提取标题（支持多种来源）
+                result.title = self._extract_title(soup, url)
+                
+                # 提取文本内容
+                result.text_content = soup.get_text(separator='\n', strip=True)
+                result.word_count = len(result.text_content.split())
+            
             result.load_time = time.time() - start_time
 
             # Parse HTML content
@@ -165,10 +172,8 @@ class URLScanner:
         result.text_content = soup.get_text(separator=' ', strip=True)
         result.word_count = len(result.text_content.split())
 
-        # Extract title
-        title_tag = soup.find('title')
-        if title_tag:
-            result.title = title_tag.get_text(strip=True)
+        # Extract title (已在 scan 方法中处理)
+        # Title extraction is handled in _extract_title method
 
         # Extract meta tags
         for meta in soup.find_all('meta'):
@@ -242,6 +247,67 @@ class URLScanner:
             href = urljoin(url, str(href).strip())
             if href not in result.links['stylesheets']:
                 result.links['stylesheets'].append(href)
+
+    def _extract_title(self, soup: BeautifulSoup, url: str) -> Optional[str]:
+        """
+        智能提取页面标题，支持多种来源和格式
+        
+        优先级：
+        1. og:title (Open Graph)
+        2. Twitter title
+        3. <title> 标签
+        4. 微信公众号专用标题选择器
+        5. h1 标签
+        """
+        title = None
+        
+        # 1. 尝试 Open Graph title (最可靠)
+        og_title = soup.find('meta', property='og:title')
+        if og_title and og_title.get('content'):
+            title = og_title['content'].strip()
+            if title:
+                logger.debug(f"从 og:title 提取标题: {title}")
+                return title
+        
+        # 2. 尝试 Twitter title
+        twitter_title = soup.find('meta', attrs={'name': 'twitter:title'})
+        if twitter_title and twitter_title.get('content'):
+            title = twitter_title['content'].strip()
+            if title:
+                logger.debug(f"从 twitter:title 提取标题: {title}")
+                return title
+        
+        # 3. 尝试标准 <title> 标签
+        title_tag = soup.find('title')
+        if title_tag and title_tag.string:
+            title = title_tag.string.strip()
+            if title:
+                logger.debug(f"从 <title> 标签提取标题: {title}")
+                return title
+        
+        # 4. 微信公众号特殊处理
+        if 'weixin.qq.com' in url or 'mp.weixin.qq.com' in url:
+            # 微信公众号文章标题通常在 id="activity-name" 或 class="rich_media_title" 中
+            wechat_title = soup.find(id='activity-name')
+            if not wechat_title:
+                wechat_title = soup.find(class_='rich_media_title')
+            if wechat_title:
+                title = wechat_title.get_text(strip=True)
+                if title:
+                    logger.debug(f"从微信公众号专用选择器提取标题: {title}")
+                    return title
+        
+        # 5. 尝试 h1 标签
+        h1_tag = soup.find('h1')
+        if h1_tag:
+            title = h1_tag.get_text(strip=True)
+            if title:
+                logger.debug(f"从 <h1> 标签提取标题: {title}")
+                return title
+        
+        # 6. 如果都没有，返回 None
+        logger.warning(f"无法从页面提取标题: {url}")
+        return None
 
     def scan_batch(self, urls: List[str], callback=None) -> List[ScanResult]:
         """
