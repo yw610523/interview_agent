@@ -297,6 +297,7 @@ onMounted(() => {
 .crawler-view {
   max-width: 1200px;
   margin: 0 auto;
+  padding: 24px;
 }
 
 .log-container {

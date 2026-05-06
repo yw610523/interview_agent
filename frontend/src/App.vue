@@ -1,7 +1,7 @@
 <template>
   <a-config-provider :locale="zhCN">
     <div id="app">
-      <a-layout style="min-height: 100vh">
+      <a-layout style="height: 100vh">
         <a-layout-header class="header">
           <div class="logo">
             <h1 style="color: white; margin: 0;">🎯 Interview AI Agent</h1>
@@ -27,11 +27,11 @@
           </a-menu>
         </a-layout-header>
         
-        <a-layout-content style="padding: 24px; background: #f0f2f5;">
+        <a-layout-content style="padding: 0; background: #ffffff; overflow: hidden;">
           <router-view />
         </a-layout-content>
         
-        <a-layout-footer style="text-align: center; background: #f0f2f5;">
+        <a-layout-footer style="text-align: center; background: #ffffff; padding: 12px 24px; height: 48px; line-height: 24px; color: #8c8c8c; border-top: 1px solid #f0f0f0;">
           Interview AI Agent ©2024 - 智能面试题管理系统
         </a-layout-footer>
       </a-layout>
@@ -49,10 +49,16 @@ const selectedKeys = ref([route.path])
 </script>
 
 <style>
-body {
+html, body {
   margin: 0;
   padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  height: 100%;
+}
+
+#app {
+  height: 100%;
+  overflow-y: auto;
 }
 
 .header {
@@ -63,9 +69,5 @@ body {
 
 .logo {
   margin-right: 48px;
-}
-
-#app {
-  min-height: 100vh;
 }
 </style>

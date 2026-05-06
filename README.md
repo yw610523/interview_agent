@@ -147,6 +147,7 @@ npm run dev
 前端功能：
 - 🎯 爬虫配置管理（批量爬取、单页爬取）
 - 🎲 面试题生成（指定类型、数量、难度等）
+- ⚙️ 系统设置管理（模型、Redis、邮件、定时任务配置）
 - 📊 系统状态监控
 
 ## ⚙️ CI/CD 自动化
@@ -208,6 +209,16 @@ docker pull ghcr.io/<username>/interview_agent:latest
 | `/api/config` | PUT | 更新爬虫配置 |
 | `/api/scheduler-config` | GET | 获取定时任务配置 |
 | `/api/scheduler-config` | PUT | 更新定时任务配置 |
+
+### 系统配置管理
+
+| 接口 | 方法 | 描述 |
+|------|------|------|
+| `/api/system-config` | GET | 获取所有系统配置（按类别分组） |
+| `/api/llm-config` | PUT | 更新模型配置 |
+| `/api/redis-config` | PUT | 更新Redis配置 |
+| `/api/email-config` | PUT | 更新邮件配置 |
+| `/api/test-email` | POST | 测试邮件发送 |
 
 ### 搜索功能
 
@@ -334,6 +345,45 @@ curl -X POST "http://localhost:8000/questions/generate-batch?count=10&difficulty
   ]
 }
 ```
+
+#### 7. 获取系统配置
+
+```bash
+curl http://localhost:8000/api/system-config
+```
+
+响应示例：
+```json
+{
+  "status": "success",
+  "config": {
+    "crawler": { ... },
+    "llm": {
+      "openai_api_key": "sk-***",
+      "openai_api_base": "https://api.openai.com/v1",
+      "openai_model": "gpt-4o-mini",
+      ...
+    },
+    "redis": { ... },
+    "email": { ... },
+    "scheduler": { ... }
+  }
+}
+```
+
+#### 8. 更新模型配置
+
+```bash
+curl -X PUT http://localhost:8000/api/llm-config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "openai_api_key": "your-api-key",
+    "openai_api_base": "https://api.openai.com/v1",
+    "openai_model": "gpt-4o-mini"
+  }'
+```
+
+**注意**: 修改模型、Redis、邮件或定时任务配置后，需要重启服务才能生效。
 
 #### 4. 提交面试题（直接入库）
 
@@ -605,6 +655,7 @@ pytest --cov=app tests/
 - [ ] 日志系统完善
 - [ ] 面试题去重优化
 - [ ] 更多大模型支持
+- [x] 系统设置界面（已完成）
 
 ## 相关文档
 
@@ -612,6 +663,9 @@ pytest --cov=app tests/
 - **[STREAMING_CRAWL.md](STREAMING_CRAWL.md)**: 流式处理架构技术说明
 - **[URL_FILTER_GUIDE.md](URL_FILTER_GUIDE.md)**: URL过滤规则使用指南
 - **[SINGLE_PAGE_CRAWL.md](SINGLE_PAGE_CRAWL.md)**: 单页爬取接口使用说明
+- **[SYSTEM_SETTINGS.md](docs/SYSTEM_SETTINGS.md)**: 系统设置功能详细说明
+- **[SYSTEM_SETTINGS_UI_GUIDE.md](docs/SYSTEM_SETTINGS_UI_GUIDE.md)**: 系统设置界面使用指南
+- **[QUICK_START_SETTINGS.md](QUICK_START_SETTINGS.md)**: 系统设置快速开始指南
 - **[frontend/README.md](frontend/README.md)**: 前端界面使用说明
 
 ## 项目结构
@@ -664,7 +718,8 @@ interview_agent/
 │   ├── README_CRAWLER.md          # 爬虫功能说明
 │   ├── STREAMING_CRAWL.md         # 流式处理文档
 │   ├── URL_FILTER_GUIDE.md        # URL过滤文档
-│   └── SINGLE_PAGE_CRAWL.md       # 单页爬取文档
+│   ├── SINGLE_PAGE_CRAWL.md       # 单页爬取文档
+│   └── SYSTEM_SETTINGS.md         # 系统设置文档
 ├── deploy/                        # 🚀 部署配置
 │   ├── Dockerfile
 │   ├── docker-compose.yml

@@ -23,6 +23,9 @@ from app.config.crawler_config import (
 from app.services.llm_service import LLMService
 from app.services.vector_service import VectorService, VectorRecord
 
+# 导入配置热加载管理器
+from app.services.config_hot_reload import config_reload_manager
+
 # 定时任务相关
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -44,6 +47,9 @@ sse_log_queues: Dict[str, Queue] = {}
 # 初始化服务
 llm_service = LLMService()
 vector_service = VectorService()
+
+# 设置配置热加载管理器的服务引用
+config_reload_manager.set_services(llm_service, vector_service)
 
 
 # 定义面试题数据模型
@@ -916,37 +922,55 @@ async def crawl_single_page_stream(url: str):
                     
                     log_callback("正在使用AI识别面试问题...", 30, "analyzing")
                     
-                    # 临时重定向日志输出到SSE（只推送重要日志）
+                    # 临时重定向日志输出到SSE（推送所有日志）
                     original_handlers = logger.handlers.copy()
                     
                     class SSELogHandler(logging.Handler):
                         def emit(self, record):
-                            # 只推送 WARNING 及以上级别的日志，以及特定的 INFO 日志
-                            if record.levelno < logging.WARNING:
-                                # 对于 INFO 级别，只推送关键信息
+                            try:
+                                # 获取格式化的日志消息
                                 log_message = self.format(record)
-                                # 只推送包含关键信息的日志
-                                important_keywords = [
-                                    "页面", "chunk", "识别出", "问题", 
-                                    "插入", "完成", "失败", "错误"
-                                ]
-                                if any(keyword in log_message for keyword in important_keywords):
-                                    # 根据日志内容判断进度
-                                    if "chunk" in log_message.lower() and "识别出" in log_message:
-                                        log_callback(log_message, 60, "processing")
-                                    elif "页面" in log_message and "处理" in log_message:
-                                        log_callback(log_message, 40, "processing")
-                                    # 其他INFO日志不推送到前端，避免干扰
-                            else:
-                                # WARNING 和 ERROR 级别直接推送
-                                log_message = self.format(record)
+                                
+                                # 根据日志级别确定类型和进度
                                 if record.levelno >= logging.ERROR:
-                                    log_callback(log_message, 0, "error")
-                                else:
-                                    log_callback(log_message, 50, "warning")
+                                    log_type = "error"
+                                    progress = 0
+                                elif record.levelno >= logging.WARNING:
+                                    log_type = "warning"
+                                    progress = 50
+                                else:  # INFO and DEBUG
+                                    log_type = "info"
+                                    # 对于INFO级别，尝试从日志内容推断进度
+                                    progress = 50  # 默认进度
+                                    
+                                    # 根据关键词估算进度
+                                    if "扫描" in log_message or "scan" in log_message.lower():
+                                        progress = 20
+                                    elif "分析" in log_message or "analyze" in log_message.lower() or "识别" in log_message:
+                                        progress = 40
+                                    elif "chunk" in log_message.lower():
+                                        progress = 60
+                                    elif "插入" in log_message or "insert" in log_message.lower():
+                                        progress = 75
+                                    elif "完成" in log_message or "complete" in log_message.lower():
+                                        progress = 90
+                                
+                                # 创建日志数据并推送到队列
+                                log_data = {
+                                    "type": "log",
+                                    "message": log_message,
+                                    "progress": progress,
+                                    "step": log_type,
+                                    "timestamp": time.time(),
+                                    "level": record.levelname
+                                }
+                                log_queue.put(json.dumps(log_data))
+                            except Exception:
+                                # 避免日志处理异常影响主流程
+                                pass
                     
                     sse_handler = SSELogHandler()
-                    sse_handler.setFormatter(logging.Formatter('%(message)s'))
+                    sse_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
                     logger.addHandler(sse_handler)
                     
                     try:
@@ -1108,13 +1132,16 @@ async def get_scheduler_config_api():
 @app.put("/api/scheduler-config", summary="更新定时任务配置")
 async def update_scheduler_config(hour: int, minute: int):
     """
-    更新定时任务配置（需要重启服务生效）
+    更新定时任务配置（支持热加载，无需重启）
     """
     try:
-        # 这里只返回提示，实际修改需要更新.env文件
+        # 热加载定时任务配置
+        reload_success = config_reload_manager.reload_scheduler_config(scheduler, hour, minute)
+        
         return {
             "status": "success",
-            "message": "请在.env文件中修改SCHEDULER_HOUR和SCHEDULER_MINUTE后重启服务",
+            "message": "定时任务配置已更新" + ("（已热加载，立即生效）" if reload_success else "（请重启服务使配置生效）"),
+            "hot_reload": reload_success,
             "current_config": {
                 "hour": hour,
                 "minute": minute
@@ -1122,6 +1149,228 @@ async def update_scheduler_config(hour: int, minute: int):
         }
     except Exception as e:
         logger.error(f"更新定时配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/llm-config", summary="更新模型配置")
+async def update_llm_config(config_data: Dict[str, Any]):
+    """
+    更新模型配置（支持热加载，无需重启）
+    """
+    try:
+        import os
+        from dotenv import load_dotenv, set_key, find_dotenv
+        
+        # 加载环境变量
+        dotenv_path = find_dotenv()
+        if not dotenv_path:
+            dotenv_path = '.env'
+        
+        # 更新.env文件中的配置
+        for key, value in config_data.items():
+            env_key = key.upper()
+            if value is not None and value != '':
+                set_key(dotenv_path, env_key, str(value))
+            else:
+                # 如果值为空，删除该配置项
+                if os.getenv(env_key):
+                    # 读取文件并删除对应行
+                    with open(dotenv_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                    with open(dotenv_path, 'w', encoding='utf-8') as f:
+                        for line in lines:
+                            if not line.startswith(f'{env_key}='):
+                                f.write(line)
+        
+        # 热加载配置
+        reload_success = config_reload_manager.reload_llm_config()
+        
+        return {
+            "status": "success",
+            "message": "模型配置已更新" + ("（已热加载，立即生效）" if reload_success else "（请重启服务使配置生效）"),
+            "hot_reload": reload_success,
+            "config": config_data
+        }
+    except Exception as e:
+        logger.error(f"更新模型配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/redis-config", summary="更新Redis配置")
+async def update_redis_config(redis_url: str):
+    """
+    更新Redis配置（支持热加载，无需重启）
+    """
+    try:
+        import os
+        from dotenv import load_dotenv, set_key, find_dotenv
+        
+        # 加载环境变量
+        dotenv_path = find_dotenv()
+        if not dotenv_path:
+            dotenv_path = '.env'
+        
+        # 更新REDIS_URL
+        set_key(dotenv_path, 'REDIS_URL', redis_url)
+        
+        # 热加载配置
+        reload_success = config_reload_manager.reload_redis_config()
+        
+        return {
+            "status": "success",
+            "message": "Redis配置已更新" + ("（已热加载，立即生效）" if reload_success else "（请重启服务使配置生效）"),
+            "hot_reload": reload_success,
+            "config": {"redis_url": redis_url}
+        }
+    except Exception as e:
+        logger.error(f"更新Redis配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/email-config", summary="更新邮件配置")
+async def update_email_config(config_data: Dict[str, Any]):
+    """
+    更新邮件配置（支持热加载，无需重启）
+    """
+    try:
+        import os
+        from dotenv import load_dotenv, set_key, find_dotenv
+        
+        # 加载环境变量
+        dotenv_path = find_dotenv()
+        if not dotenv_path:
+            dotenv_path = '.env'
+        
+        # 更新邮件配置
+        email_mapping = {
+            'smtp_server': 'SMTP_SERVER',
+            'smtp_port': 'SMTP_PORT',
+            'smtp_user': 'SMTP_USER',
+            'smtp_password': 'SMTP_PASSWORD',
+            'smtp_test_user': 'SMTP_TEST_USER'
+        }
+        
+        for key, value in config_data.items():
+            if key in email_mapping:
+                env_key = email_mapping[key]
+                if value is not None and value != '' and value != '********':
+                    set_key(dotenv_path, env_key, str(value))
+        
+        # 热加载配置
+        reload_success = config_reload_manager.reload_email_config()
+        
+        return {
+            "status": "success",
+            "message": "邮件配置已更新" + ("（已热加载，立即生效）" if reload_success else "（请重启服务使配置生效）"),
+            "hot_reload": reload_success,
+            "config": config_data
+        }
+    except Exception as e:
+        logger.error(f"更新邮件配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/test-email", summary="测试邮件发送")
+async def test_email():
+    """
+    测试邮件发送功能
+    """
+    try:
+        import os
+        from app.services.email_service import send_interview_email
+        
+        # 获取测试邮箱
+        test_user = os.getenv("SMTP_TEST_USER")
+        if not test_user:
+            raise HTTPException(status_code=400, detail="未配置测试邮箱(SMTP_TEST_USER)")
+        
+        # 创建测试问题
+        test_questions = [
+            {
+                "title": "测试问题 - 什么是Python装饰器？",
+                "answer": "这是一个测试答案。装饰器是一种特殊的函数，可以用来修改其他函数的行为。",
+                "difficulty": "easy",
+                "category": "Python基础"
+            }
+        ]
+        
+        # 发送测试邮件
+        result = send_interview_email(test_user, test_questions)
+        
+        if result == 250 or result == 200:
+            return {
+                "status": "success",
+                "message": f"测试邮件已发送到 {test_user}"
+            }
+        else:
+            return {
+                "status": "warning",
+                "message": f"邮件发送可能失败，状态码: {result}"
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"测试邮件发送失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"邮件发送失败: {str(e)}")
+
+
+@app.get("/api/system-config", summary="获取系统配置")
+async def get_system_config():
+    """
+    获取所有系统配置（按类别分组）
+    """
+    try:
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        
+        # 爬虫配置
+        DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
+        if DEFAULT_CONFIG_PATH.exists():
+            crawler_config = CrawlerConfig.from_json(str(DEFAULT_CONFIG_PATH))
+        else:
+            crawler_config = get_config_from_env()
+        
+        # 模型配置
+        llm_config = {
+            "openai_api_key": os.getenv("OPENAI_API_KEY", ""),
+            "openai_api_base": os.getenv("OPENAI_API_BASE", ""),
+            "openai_model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            "openai_embedding_model": os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+            "embedding_dimension": int(os.getenv("EMBEDDING_DIMENSION", "1536")),
+            "model_max_input_tokens": os.getenv("MODEL_MAX_INPUT_TOKENS", ""),
+            "model_max_output_tokens": os.getenv("MODEL_MAX_OUTPUT_TOKENS", ""),
+        }
+        
+        # Redis配置
+        redis_config = {
+            "redis_url": os.getenv("REDIS_URL", "redis://localhost:6379"),
+        }
+        
+        # 邮件配置
+        email_config = {
+            "smtp_server": os.getenv("SMTP_SERVER", ""),
+            "smtp_port": int(os.getenv("SMTP_PORT", "587")),
+            "smtp_user": os.getenv("SMTP_USER", ""),
+            "smtp_password": os.getenv("SMTP_PASSWORD", ""),
+            "smtp_test_user": os.getenv("SMTP_TEST_USER", ""),
+        }
+        
+        # 定时任务配置
+        scheduler_cfg = get_scheduler_config()
+        
+        return {
+            "status": "success",
+            "config": {
+                "crawler": crawler_config.to_dict(),
+                "llm": llm_config,
+                "redis": redis_config,
+                "email": email_config,
+                "scheduler": scheduler_cfg,
+            }
+        }
+    except Exception as e:
+        logger.error(f"获取系统配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

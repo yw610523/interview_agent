@@ -1,158 +1,108 @@
 <template>
   <div class="home-view">
-    <a-row :gutter="[24, 24]">
-      <!-- 欢迎卡片 -->
-      <a-col :span="24">
-        <a-card title="🎯 欢迎使用 Interview AI Agent" :bordered="false">
-          <p style="font-size: 16px; line-height: 1.8;">
-            这是一个基于大模型的智能面试题管理系统，支持自动爬取技术文档、AI识别面试题、向量存储和语义搜索。
-          </p>
-          <a-divider />
-          <a-space direction="vertical" size="large" style="width: 100%;">
-            <div>
-              <h3>✨ 主要功能</h3>
-              <ul style="line-height: 2;">
-                <li><strong>智能爬虫</strong>：支持批量爬取和单页爬取，自动识别面试问题</li>
-                <li><strong>配置管理</strong>：在系统设置页面配置爬虫参数和定时任务</li>
-                <li><strong>面试题生成</strong>：随机生成指定类型、数量的面试题</li>
-                <li><strong>语义搜索</strong>：在首页快速搜索面试题，支持关键词检索</li>
-                <li><strong>答案展示</strong>：点击按钮查看答案，支持展开/收起</li>
-              </ul>
-            </div>
-          </a-space>
-        </a-card>
-      </a-col>
-
-      <!-- 快速操作卡片 -->
-      <a-col :xs="24" :md="12">
-        <a-card title="🚀 快速开始" :bordered="false">
-          <a-space direction="vertical" size="middle" style="width: 100%;">
-            <a-button type="primary" size="large" block @click="$router.push('/crawler')">
-              进入爬虫管理
-            </a-button>
-            <a-button type="primary" size="large" block @click="$router.push('/questions')">
-              生成面试题
-            </a-button>
-            <a-button size="large" block @click="$router.push('/settings')">
-              系统设置
-            </a-button>
-          </a-space>
-        </a-card>
-      </a-col>
-
-      <!-- 统计信息卡片 -->
-      <a-col :xs="24" :md="12">
-        <a-card title="📊 系统状态" :bordered="false">
-          <a-spin :spinning="loading">
-            <a-descriptions bordered :column="1" size="small">
-              <a-descriptions-item label="面试题总数">
-                <a-tag color="blue">{{ questionCount }}</a-tag>
-              </a-descriptions-item>
-              <a-descriptions-item label="上次爬取时间">
-                {{ lastCrawlTime || '暂无' }}
-              </a-descriptions-item>
-              <a-descriptions-item label="上次爬取问题数">
-                {{ lastCrawlQuestions || 0 }}
-              </a-descriptions-item>
-            </a-descriptions>
-          </a-spin>
-          <a-button 
-            type="link" 
-            @click="loadStats" 
-            style="margin-top: 12px;"
-          >
-            刷新统计
+    <!-- 搜索区域 -->
+    <div class="search-container">
+      <transition name="fade">
+        <div v-if="!hasSearched" class="hero-image">
+          <svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#4096ff;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#69c0ff;stop-opacity:1" />
+              </linearGradient>
+            </defs>
+            <!-- 搜索图标 -->
+            <circle cx="70" cy="60" r="25" fill="none" stroke="url(#grad1)" stroke-width="3"/>
+            <line x1="88" y1="78" x2="105" y2="95" stroke="url(#grad1)" stroke-width="3" stroke-linecap="round"/>
+            <!-- 装饰元素 -->
+            <circle cx="140" cy="40" r="8" fill="#4096ff" opacity="0.3"/>
+            <circle cx="160" cy="70" r="5" fill="#69c0ff" opacity="0.4"/>
+            <circle cx="130" cy="90" r="6" fill="#4096ff" opacity="0.2"/>
+            <!-- 文档图标 -->
+            <rect x="135" y="30" width="20" height="25" rx="2" fill="none" stroke="#4096ff" stroke-width="2" opacity="0.5"/>
+            <line x1="140" y1="38" x2="150" y2="38" stroke="#4096ff" stroke-width="1.5" opacity="0.5"/>
+            <line x1="140" y1="43" x2="150" y2="43" stroke="#4096ff" stroke-width="1.5" opacity="0.5"/>
+            <line x1="140" y1="48" x2="147" y2="48" stroke="#4096ff" stroke-width="1.5" opacity="0.5"/>
+          </svg>
+        </div>
+      </transition>
+      
+      <a-input
+        v-model:value="searchQuery"
+        placeholder="搜索面试题..."
+        size="large"
+        allow-clear
+        @keyup.enter="handleSearch"
+        class="search-input"
+      >
+        <template #prefix>
+          <SearchOutlined />
+        </template>
+        <template #suffix>
+          <a-button type="primary" @click="handleSearch" :loading="searching">
+            搜索
           </a-button>
-        </a-card>
-      </a-col>
+        </template>
+      </a-input>
+    </div>
 
-      <!-- 快速搜索卡片 -->
-      <a-col :span="24">
-        <a-card title="🔍 快速搜索面试题" :bordered="false">
-          <a-form layout="inline" @submit.prevent="handleSearch">
-            <a-form-item label="关键词" style="flex: 1;">
-              <a-input
-                v-model:value="searchQuery"
-                placeholder="输入关键词搜索面试题，例如：Python、算法、数据库..."
-                allow-clear
-                @press-enter="handleSearch"
-                style="width: 100%; min-width: 300px;"
-              >
-                <template #prefix>
-                  <SearchOutlined />
-                </template>
-              </a-input>
-            </a-form-item>
-            
-            <a-form-item label="数量">
-              <a-input-number 
-                v-model:value="searchLimit" 
-                :min="1" 
-                :max="50" 
-                style="width: 100px;"
-              />
-            </a-form-item>
-
-            <a-form-item>
-              <a-button type="primary" @click="handleSearch" :loading="searching">
-                🔍 搜索
-              </a-button>
-            </a-form-item>
-          </a-form>
-
-          <!-- 搜索结果 -->
-          <div v-if="searchResults.length > 0" style="margin-top: 24px;">
-            <a-divider>搜索结果 ({{ searchResults.length }})</a-divider>
-            <a-list
-              item-layout="vertical"
-              :data-source="searchResults"
-              :pagination="{
-                pageSize: 5,
-                showSizeChanger: false,
-                showTotal: (total) => `共 ${total} 条结果`
-              }"
-            >
-              <template #renderItem="{ item }">
-                <a-list-item>
-                  <a-card hoverable style="width: 100%; margin-bottom: 12px;">
-                    <template #title>
-                      <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 16px;">{{ item.title }}</span>
-                        <a-space>
-                          <a-tag color="blue">{{ item.difficulty || 'medium' }}</a-tag>
-                          <a-tag v-if="item.category" color="green">{{ item.category }}</a-tag>
-                          <a-tag v-for="tag in (item.tags || [])" :key="tag" color="purple">
-                            {{ tag }}
-                          </a-tag>
-                        </a-space>
-                      </div>
-                    </template>
-                    
-                    <MarkdownRenderer :content="item.answer" />
-                    
-                    <a-divider style="margin: 12px 0;" />
-                    
-                    <div style="font-size: 13px; color: #666;">
-                      <strong>来源:</strong> 
-                      <a :href="item.source_url" target="_blank" style="margin-left: 8px;">
-                        {{ item.source_url }}
-                      </a>
-                    </div>
-                  </a-card>
-                </a-list-item>
+    <!-- 搜索结果 -->
+    <div v-if="searchResults.length > 0" class="results-container">
+      <a-list
+        item-layout="vertical"
+        :data-source="searchResults"
+        :pagination="{
+          pageSize: 5,
+          showSizeChanger: false,
+          showTotal: (total) => `共 ${total} 条结果`
+        }"
+      >
+        <template #renderItem="{ item }">
+          <a-list-item>
+            <a-card hoverable class="result-card">
+              <template #title>
+                <div class="card-header">
+                  <span class="question-title">{{ item.title }}</span>
+                  <a-space>
+                    <a-tag color="blue">{{ item.difficulty || 'medium' }}</a-tag>
+                    <a-tag v-if="item.category" color="green">{{ item.category }}</a-tag>
+                    <a-tag v-for="tag in (item.tags || [])" :key="tag" color="purple">
+                      {{ tag }}
+                    </a-tag>
+                  </a-space>
+                </div>
               </template>
-            </a-list>
-          </div>
+              
+              <MarkdownRenderer :content="item.answer" />
+              
+              <a-divider style="margin: 12px 0;" />
+              
+              <div class="source-info">
+                <strong>来源:</strong> 
+                <a :href="item.source_url" target="_blank">
+                  {{ item.source_url }}
+                </a>
+              </div>
+            </a-card>
+          </a-list-item>
+        </template>
+      </a-list>
+    </div>
 
-          <!-- 空状态提示 -->
-          <a-empty 
-            v-else-if="hasSearched" 
-            description="没有找到相关的面试题，请尝试其他关键词" 
-            style="margin-top: 24px;"
-          />
-        </a-card>
-      </a-col>
-    </a-row>
+    <!-- 空状态提示 -->
+    <a-empty 
+      v-else-if="hasSearched" 
+      description="没有找到相关的面试题，请尝试其他关键词" 
+      class="empty-state"
+    />
+
+    <!-- 页脚统计信息 -->
+    <div class="footer">
+      <a-space split="|">
+        <span>面试题总数: <strong>{{ questionCount }}</strong></span>
+        <span v-if="lastCrawlTime">上次更新: {{ lastCrawlTime }}</span>
+      </a-space>
+    </div>
   </div>
 </template>
 
@@ -163,21 +113,17 @@ import { message } from 'ant-design-vue'
 import { SearchOutlined } from '@ant-design/icons-vue'
 import MarkdownRenderer from '../components/MarkdownRenderer.vue'
 
-const loading = ref(false)
 const questionCount = ref(0)
 const lastCrawlTime = ref('')
-const lastCrawlQuestions = ref(0)
 
 // 搜索相关
 const searchQuery = ref('')
-const searchLimit = ref(10)
 const searching = ref(false)
 const searchResults = ref([])
 const hasSearched = ref(false)
 
 // 加载统计数据
 const loadStats = async () => {
-  loading.value = true
   try {
     // 获取面试题总数
     const countRes = await questionApi.getQuestionCount()
@@ -187,20 +133,15 @@ const loadStats = async () => {
     const statusRes = await crawlerApi.getCrawlStatus()
     if (statusRes.last_crawl) {
       lastCrawlTime.value = statusRes.last_crawl.timestamp
-      lastCrawlQuestions.value = statusRes.last_crawl.parsed_questions || 0
     }
   } catch (error) {
-    message.error('加载统计数据失败')
-    console.error(error)
-  } finally {
-    loading.value = false
+    console.error('加载统计数据失败', error)
   }
 }
 
 // 处理搜索
 const handleSearch = async () => {
   if (!searchQuery.value.trim()) {
-    message.warning('请输入搜索关键词')
     return
   }
 
@@ -209,17 +150,12 @@ const handleSearch = async () => {
   searchResults.value = []
 
   try {
-    const res = await questionApi.searchQuestions(
-      searchQuery.value,
-      searchLimit.value
-    )
+    const res = await questionApi.searchQuestions(searchQuery.value, 10)
     
     searchResults.value = res.results || []
     
     if (searchResults.value.length === 0) {
       message.info('没有找到相关的面试题')
-    } else {
-      message.success(`找到 ${res.total} 条相关结果`)
     }
   } catch (error) {
     message.error('搜索失败')
@@ -238,13 +174,112 @@ onMounted(() => {
 .home-view {
   max-width: 1200px;
   margin: 0 auto;
+  padding: 24px;
+  height: calc(100vh - 64px - 48px);
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
 }
 
-h3 {
-  margin-bottom: 16px;
+.search-container {
+  flex-shrink: 0;
+  margin-bottom: 24px;
+  padding: 0 8px;
+  width: 100%;
+  text-align: center;
 }
 
-ul {
-  padding-left: 20px;
+.results-container {
+  flex: 1;
+  overflow-y: auto;
+  margin-top: 0;
+  width: 100%;
+  padding-right: 8px;
+}
+
+/* 自定义滚动条样式 */
+.results-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.results-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.results-container::-webkit-scrollbar-thumb {
+  background: #d9d9d9;
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+.results-container::-webkit-scrollbar-thumb:hover {
+  background: #bfbfbf;
+}
+
+.hero-image {
+  margin-bottom: 24px;
+  display: flex;
+  justify-content: center;
+}
+
+.hero-image svg {
+  width: 160px;
+  height: 100px;
+}
+
+/* 淡入淡出动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.search-input :deep(.ant-input-affix-wrapper) {
+  padding: 0 11px;
+  border-radius: 8px;
+  width: 100%;
+}
+
+.search-input :deep(.ant-input) {
+  font-size: 15px;
+}
+
+.search-input :deep(.ant-input-suffix) {
+  right: 0;
+}
+
+.search-input :deep(.ant-btn-primary) {
+  border-radius: 6px;
+  height: 32px;
+  padding: 0 20px;
+  font-size: 14px;
+  margin: 0;
+}
+
+.results-container {
+  margin-top: 24px;
+  width: 100%;
+}
+
+.results-container :deep(.ant-list) {
+  padding: 0;
+}
+
+.results-container :deep(.ant-list-item) {
+  padding: 0;
+}
+
+.footer {
+  margin-top: 24px;
+  padding: 16px 0;
+  text-align: center;
+  color: #8c8c8c;
+  font-size: 14px;
+  border-top: 1px solid #f0f0f0;
+  flex-shrink: 0;
 }
 </style>

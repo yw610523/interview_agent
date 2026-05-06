@@ -37,6 +37,33 @@ export const crawlerApi = {
   }
 }
 
+export const systemConfigApi = {
+  // 获取系统配置
+  getSystemConfig() {
+    return apiClient.get('/system-config')
+  },
+
+  // 更新模型配置
+  updateLlmConfig(config) {
+    return apiClient.put('/llm-config', config)
+  },
+
+  // 更新Redis配置
+  updateRedisConfig(redisUrl) {
+    return apiClient.put('/redis-config', { redis_url: redisUrl })
+  },
+
+  // 更新邮件配置
+  updateEmailConfig(config) {
+    return apiClient.put('/email-config', config)
+  },
+
+  // 测试邮件发送
+  testEmail() {
+    return apiClient.post('/test-email')
+  }
+}
+
 export const questionApi = {
   // 批量生成面试题
   generateBatch(count, difficulty, category, tags) {
