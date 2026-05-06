@@ -1,10 +1,10 @@
 name: Deploy to Production
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # 仅手动触发
     inputs:
       environment:
-        description: 'Deployment environment'
+        description: '部署环境'
         required: true
         default: 'production'
         type: choice
@@ -12,12 +12,11 @@ on:
           - production
           - staging
       version:
-        description: 'Version to deploy (leave empty for latest)'
+        description: '部署版本（留空使用 latest）'
         required: false
         type: string
-  
-  release:
-    types: [ published ]
+  # release:
+  #   types: [ published ]
 
 env:
   REGISTRY: ghcr.io

@@ -1,11 +1,18 @@
 name: Docker Publish
 
 on:
-  push:
-    branches: [ main ]
-    tags: [ 'v*.*.*' ]
-  release:
-    types: [ published ]
+  workflow_dispatch:  # 仅手动触发
+    inputs:
+      push_to_registry:
+        description: '是否推送到 GHCR'
+        required: false
+        default: 'true'
+        type: boolean
+  # push:
+  #   branches: [ main ]
+  #   tags: [ 'v*.*.*' ]
+  # release:
+  #   types: [ published ]
 
 env:
   REGISTRY: ghcr.io
@@ -53,7 +60,7 @@ jobs:
         with:
           context: .
           file: deploy/Dockerfile
-          push: true
+          push: ${{ github.event.inputs.push_to_registry == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
