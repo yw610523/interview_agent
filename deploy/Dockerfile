@@ -4,11 +4,11 @@ FROM node:18-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 # 复制前端文件并安装依赖
-COPY frontend/package*.json ./
+COPY frontend/package*.json ./frontend/
 RUN npm install --production=false
 
 # 复制前端源代码并构建
-COPY frontend/ ./
+COPY frontend/ ./frontend/
 RUN npm run build
 
 # 后端构建阶段
@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制 Python 依赖文件并安装
-COPY requirements.txt .
+COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
@@ -52,10 +52,10 @@ COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
 
 # 配置 Nginx
 RUN rm /etc/nginx/conf.d/default.conf
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 
 # 创建启动脚本
-COPY docker-entrypoint.sh /docker-entrypoint.sh
+COPY deploy/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
 # 暴露端口（Nginx 默认 80）
