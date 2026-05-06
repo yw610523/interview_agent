@@ -4,11 +4,11 @@ FROM node:18-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 # 复制前端文件并安装依赖
-COPY frontend/package*.json ./frontend/
+COPY frontend/package*.json ./
 RUN npm install --production=false
 
 # 复制前端源代码并构建
-COPY frontend/ ./frontend/
+COPY frontend/ ./
 RUN npm run build
 
 # 后端构建阶段
