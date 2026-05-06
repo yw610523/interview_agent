@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 const apiClient = axios.create({
-  baseURL: '',
+  baseURL: '/api',  // 使用相对路径，通过 Nginx 反向代理到后端
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json'

@@ -1,5 +1,11 @@
 # Interview AI Agent - 智能面试题管理系统
 
+![CI Pipeline](https://github.com/your-username/interview_agent/actions/workflows/ci.yml/badge.svg)
+![Docker Publish](https://github.com/your-username/interview_agent/actions/workflows/docker-publish.yml/badge.svg)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)
+
 一个基于大模型的智能面试题管理系统，支持自动爬取技术文档、AI识别面试题、向量存储和语义搜索。
 
 ## 功能特性
@@ -16,6 +22,18 @@
 ```
 Sitemap → URL过滤 → 流式爬取 → AI识别 → 向量入库 → 语义搜索
 ```
+
+## 📚 文档导航
+
+为了保持项目结构清晰，所有文档已分类整理：
+
+- **📖 项目文档**: [docs/README.md](docs/README.md) - 完整文档索引
+- **🚀 部署配置**: [deploy/README.md](deploy/README.md) - 部署说明和快速参考
+- **💻 开发指南**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - 系统架构设计
+- **🕷️ 爬虫功能**: [docs/README_CRAWLER.md](docs/README_CRAWLER.md) - 爬虫详细说明
+- **⚙️ CI/CD**: [.github/WORKFLOWS_GUIDE.md](.github/WORKFLOWS_GUIDE.md) - GitHub Actions 配置说明
+
+> 💡 **提示**: 查看 [docs/README.md](docs/README.md) 获取所有文档的完整列表和推荐阅读路径。
 
 ## 快速开始
 
@@ -130,6 +148,39 @@ npm run dev
 - 🎯 爬虫配置管理（批量爬取、单页爬取）
 - 🎲 面试题生成（指定类型、数量、难度等）
 - 📊 系统状态监控
+
+## ⚙️ CI/CD 自动化
+
+本项目使用 GitHub Actions 实现完整的 CI/CD 自动化流程：
+
+### 🔍 持续集成 (CI)
+
+每次代码提交或 PR 时自动执行：
+- ✅ 代码质量检查（flake8 + black）
+- ✅ 单元测试（pytest，覆盖率 >60%）
+- ✅ 前端构建验证
+- ✅ Docker 镜像构建测试
+
+### 📦 Docker 镜像发布
+
+推送到 main 分支或创建 Release 时：
+- 🐳 自动构建多平台 Docker 镜像（amd64/arm64）
+- 📤 推送到 GitHub Container Registry (GHCR)
+- 🏷️ 自动生成版本标签
+
+```bash
+# 拉取最新镜像
+docker pull ghcr.io/<username>/interview_agent:latest
+```
+
+### 🚀 自动部署
+
+支持手动触发或 Release 时自动部署：
+- 🌐 多环境支持（production/staging）
+- 🔒 SSH 安全部署
+- ✔️ 健康检查和回滚机制
+
+详细配置请参考：[.github/WORKFLOWS_GUIDE.md](.github/WORKFLOWS_GUIDE.md)
 
 ## API 接口
 
@@ -607,10 +658,17 @@ interview_agent/
 ├── requirements.txt               # Python依赖
 ├── .env.template                  # 环境变量模板
 ├── README.md                      # 主文档
-├── README_CRAWLER.md              # 爬虫文档
-├── STREAMING_CRAWL.md             # 流式处理文档
-├── URL_FILTER_GUIDE.md            # URL过滤文档
-└── SINGLE_PAGE_CRAWL.md           # 单页爬取文档
+├── docs/                          # 📚 项目文档中心
+│   ├── PROJECT_OVERVIEW.md        # 项目概览
+│   ├── ARCHITECTURE.md            # 架构设计
+│   ├── README_CRAWLER.md          # 爬虫功能说明
+│   ├── STREAMING_CRAWL.md         # 流式处理文档
+│   ├── URL_FILTER_GUIDE.md        # URL过滤文档
+│   └── SINGLE_PAGE_CRAWL.md       # 单页爬取文档
+├── deploy/                        # 🚀 部署配置
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── README.md                  # 部署说明
 ```
 
 ## 许可证
@@ -637,7 +695,7 @@ A: 检查以下几点：
 
 ### Q: 如何只爬取特定类型的页面？
 
-A: 使用 URL 过滤规则，在 `.env` 或 `crawler_config.json` 中配置 `url_include_patterns` 和 `url_exclude_patterns`。详见 [URL_FILTER_GUIDE.md](URL_FILTER_GUIDE.md)。
+A: 使用 URL 过滤规则，在 `.env` 或 `crawler_config.json` 中配置 `url_include_patterns` 和 `url_exclude_patterns`。详见 [docs/URL_FILTER_GUIDE.md](docs/URL_FILTER_GUIDE.md)。
 
 ### Q: 爬虫速度太慢怎么办？
 
