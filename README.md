@@ -101,6 +101,8 @@ SCHEDULER_MINUTE=0   # 分钟（0-59）
 
 ### 启动服务
 
+#### 1. 启动后端服务
+
 ```bash
 python -m app.main
 ```
@@ -113,6 +115,21 @@ python -m app.main
 1. 初始化大模型服务和向量数据库
 2. 启动定时任务调度器（默认每天22:00执行爬取）
 3. 提供 RESTful API 接口
+
+#### 2. 启动前端服务（可选）
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+访问 http://localhost:3000 使用图形化界面。
+
+前端功能：
+- 🎯 爬虫配置管理（批量爬取、单页爬取）
+- 🎲 面试题生成（指定类型、数量、难度等）
+- 📊 系统状态监控
 
 ## API 接口
 
@@ -127,6 +144,7 @@ python -m app.main
 | `/questions` | GET | 获取所有面试题（分页） |
 | `/questions/count` | GET | 获取面试题总数 |
 | `/questions/generate` | POST | 使用大模型生成答案 |
+| `/questions/generate-batch` | POST | 批量生成随机面试题 |
 
 ### 爬虫管理
 
@@ -135,6 +153,10 @@ python -m app.main
 | `/crawl/run` | GET | 手动触发爬虫任务（流式处理） |
 | `/crawl/status` | GET | 获取最近一次爬取状态 |
 | `/crawl/single-page` | POST | 智能爬取单个页面并提取面试问题 |
+| `/api/config` | GET | 获取爬虫配置 |
+| `/api/config` | PUT | 更新爬虫配置 |
+| `/api/scheduler-config` | GET | 获取定时任务配置 |
+| `/api/scheduler-config` | PUT | 更新定时任务配置 |
 
 ### 搜索功能
 
@@ -201,6 +223,66 @@ curl -X POST "http://localhost:8000/crawl/single-page?url=https://www.runoob.com
 - 该接口用于快速爬取和分析单个技术页面
 - 自动识别页面中的面试问题并存入向量数据库
 - 适用于临时分析特定技术文章或文档
+
+#### 4. 获取爬虫配置
+
+```bash
+curl http://localhost:8000/api/config
+```
+
+响应示例：
+```json
+{
+  "status": "success",
+  "config": {
+    "sitemap_url": "javaguide.cn",
+    "timeout": 30,
+    "max_urls": null,
+    "delay_between_requests": 0.5,
+    "url_include_patterns": ["/docs/"],
+    "url_exclude_patterns": []
+  }
+}
+```
+
+#### 5. 更新爬虫配置
+
+```bash
+curl -X PUT http://localhost:8000/api/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sitemap_url": "example.com",
+    "timeout": 60,
+    "max_urls": 100,
+    "url_include_patterns": ["/tutorial/"]
+  }'
+```
+
+#### 6. 批量生成面试题
+
+```bash
+curl -X POST "http://localhost:8000/questions/generate-batch?count=10&difficulty=medium&tags=Python"
+```
+
+响应示例：
+```json
+{
+  "status": "success",
+  "count": 10,
+  "questions": [
+    {
+      "id": "xxx",
+      "title": "什么是Python装饰器？",
+      "answer": "装饰器是一种特殊的函数...",
+      "source_url": "https://example.com",
+      "tags": ["Python", "基础"],
+      "difficulty": "medium",
+      "category": "编程语言",
+      "importance_score": 0.8
+    }
+  ]
+}
+```
 
 #### 4. 提交面试题（直接入库）
 
@@ -472,7 +554,6 @@ pytest --cov=app tests/
 - [ ] 日志系统完善
 - [ ] 面试题去重优化
 - [ ] 更多大模型支持
-- [ ] 前端界面开发
 
 ## 相关文档
 
@@ -480,6 +561,7 @@ pytest --cov=app tests/
 - **[STREAMING_CRAWL.md](STREAMING_CRAWL.md)**: 流式处理架构技术说明
 - **[URL_FILTER_GUIDE.md](URL_FILTER_GUIDE.md)**: URL过滤规则使用指南
 - **[SINGLE_PAGE_CRAWL.md](SINGLE_PAGE_CRAWL.md)**: 单页爬取接口使用说明
+- **[frontend/README.md](frontend/README.md)**: 前端界面使用说明
 
 ## 项目结构
 
@@ -502,15 +584,25 @@ interview_agent/
 │   │   └── email_template.html    # 邮件模板
 │   ├── main.py                    # FastAPI应用入口
 │   └── main_crawler.py            # CLI爬虫入口
+├── frontend/                      # Vue 3 前端项目
+│   ├── src/
+│   │   ├── views/                 # 页面视图
+│   │   ├── services/              # API 服务
+│   │   ├── router/                # 路由配置
+│   │   ├── App.vue                # 根组件
+│   │   └── main.js                # 入口文件
+│   ├── index.html
+│   ├── vite.config.js
+│   ├── package.json
+│   └── README.md                  # 前端文档
 ├── tests/
 │   ├── test_sitemap_parser.py
 │   ├── test_url_scanner.py
 │   ├── test_sitemap_crawler.py
 │   ├── test_url_filter.py         # URL过滤测试
 │   ├── test_page_chunking.py      # 页面分块测试
-│   └── test_single_page_crawl.py  # 单页爬取测试
-├── examples/
-│   └── single_page_crawl_example.py  # 单页爬取示例
+│   ├── test_single_page_crawl.py  # 单页爬取测试/示例
+│   └── test_email_service.py      # 邮件服务测试
 ├── crawl_results/                 # 爬取结果存储目录
 ├── requirements.txt               # Python依赖
 ├── .env.template                  # 环境变量模板

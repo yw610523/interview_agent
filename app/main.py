@@ -360,6 +360,101 @@ async def search_questions(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/questions/count", summary="获取面试题总数")
+async def get_question_count():
+    """
+    获取向量数据库中面试题的总数
+    """
+    try:
+        count = vector_service.count()
+        return {"count": count}
+    except Exception as e:
+        logger.error(f"Count error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/questions/generate-batch", summary="批量生成面试题")
+async def generate_batch_questions(
+    count: int = Query(10, ge=1, le=50),
+    difficulty: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    tags: Optional[List[str]] = Query(None)
+):
+    """
+    从向量数据库中随机获取指定条件的面试题
+    
+    参数:
+        count: 题目数量 (1-50)
+        difficulty: 难度过滤 (easy/medium/hard)
+        category: 分类过滤
+        tags: 标签过滤
+    """
+    logger.info(f"收到批量生成请求: count={count}, difficulty={difficulty}, category={category}, tags={tags}")
+    try:
+        # 获取所有题目
+        all_questions = vector_service.get_all()
+        logger.info(f"从向量数据库获取到 {len(all_questions)} 个问题")
+        
+        if not all_questions:
+            logger.warning("数据库中没有面试题")
+            raise HTTPException(status_code=404, detail="数据库中没有面试题")
+        
+        # 过滤条件
+        filtered_questions = all_questions
+        
+        if difficulty:
+            filtered_questions = [q for q in filtered_questions if q.get('difficulty') == difficulty]
+            logger.info(f"按难度 '{difficulty}' 过滤后剩余 {len(filtered_questions)} 个问题")
+        
+        if category:
+            filtered_questions = [q for q in filtered_questions if q.get('category') == category]
+            logger.info(f"按分类 '{category}' 过滤后剩余 {len(filtered_questions)} 个问题")
+        
+        if tags:
+            filtered_questions = [
+                q for q in filtered_questions 
+                if any(tag in q.get('tags', []) for tag in tags)
+            ]
+            logger.info(f"按标签 {tags} 过滤后剩余 {len(filtered_questions)} 个问题")
+        
+        if not filtered_questions:
+            logger.warning("没有找到符合条件的面试题")
+            raise HTTPException(status_code=404, detail="没有找到符合条件的面试题")
+        
+        # 随机选择指定数量的题目
+        import random
+        selected_questions = random.sample(
+            filtered_questions, 
+            min(count, len(filtered_questions))
+        )
+        
+        logger.info(f"成功生成 {len(selected_questions)} 道面试题")
+        return {
+            "status": "success",
+            "count": len(selected_questions),
+            "questions": selected_questions
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"批量生成面试题失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/questions/generate", summary="使用大模型生成答案")
+async def generate_answer(question: str):
+    """
+    使用大模型为给定问题生成答案
+    """
+    try:
+        answer = llm_service.generate_answer(question)
+        return {"question": question, "answer": answer}
+    except Exception as e:
+        logger.error(f"Generate answer error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/questions/{question_id}", summary="获取单个面试题详情")
 async def get_question(question_id: str):
     """
@@ -423,19 +518,6 @@ async def get_all_questions(
 
     except Exception as e:
         logger.error(f"Get all questions error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/questions/count", summary="获取面试题总数")
-async def get_question_count():
-    """
-    获取向量数据库中面试题的总数
-    """
-    try:
-        count = vector_service.count()
-        return {"count": count}
-    except Exception as e:
-        logger.error(f"Count error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -517,17 +599,7 @@ async def reset_vector_index():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/questions/generate", summary="使用大模型生成答案")
-async def generate_answer(question: str):
-    """
-    使用大模型为给定问题生成答案
-    """
-    try:
-        answer = llm_service.generate_answer(question)
-        return {"question": question, "answer": answer}
-    except Exception as e:
-        logger.error(f"Generate answer error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.post("/crawl/single-page", summary="智能爬取单个页面")
@@ -607,6 +679,90 @@ async def crawl_single_page(url: str):
         raise
     except Exception as e:
         logger.error(f"单页爬取失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/config", summary="获取爬虫配置")
+async def get_crawler_config():
+    """
+    获取当前爬虫配置
+    """
+    try:
+        DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
+        
+        if DEFAULT_CONFIG_PATH.exists():
+            config = CrawlerConfig.from_json(str(DEFAULT_CONFIG_PATH))
+        else:
+            config = get_config_from_env()
+        
+        return {
+            "status": "success",
+            "config": config.to_dict()
+        }
+    except Exception as e:
+        logger.error(f"获取配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/config", summary="更新爬虫配置")
+async def update_crawler_config(config_data: Dict[str, Any]):
+    """
+    更新爬虫配置并保存到文件
+    """
+    try:
+        DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
+        
+        # 创建新配置
+        config = CrawlerConfig.from_dict(config_data)
+        
+        # 保存到文件
+        config.to_json(str(DEFAULT_CONFIG_PATH))
+        
+        logger.info(f"配置已更新并保存到: {DEFAULT_CONFIG_PATH}")
+        
+        return {
+            "status": "success",
+            "message": "配置更新成功",
+            "config": config.to_dict()
+        }
+    except Exception as e:
+        logger.error(f"更新配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/scheduler-config", summary="获取定时任务配置")
+async def get_scheduler_config_api():
+    """
+    获取定时任务配置
+    """
+    try:
+        config = get_scheduler_config()
+        return {
+            "status": "success",
+            "config": config
+        }
+    except Exception as e:
+        logger.error(f"获取定时配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/scheduler-config", summary="更新定时任务配置")
+async def update_scheduler_config(hour: int, minute: int):
+    """
+    更新定时任务配置（需要重启服务生效）
+    """
+    try:
+        # 这里只返回提示，实际修改需要更新.env文件
+        return {
+            "status": "success",
+            "message": "请在.env文件中修改SCHEDULER_HOUR和SCHEDULER_MINUTE后重启服务",
+            "current_config": {
+                "hour": hour,
+                "minute": minute
+            }
+        }
+    except Exception as e:
+        logger.error(f"更新定时配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

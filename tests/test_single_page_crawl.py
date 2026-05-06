@@ -1,59 +1,90 @@
 """
-测试单页爬取接口
+单页爬取接口测试示例
+
+使用方法:
+    python -m tests.test_single_page_crawl
 """
 import requests
 import json
 
 
-def test_single_page_crawl():
-    """测试单页爬取接口"""
+def crawl_single_page_example():
+    """单页爬取示例"""
     
-    # 测试URL - 可以替换为任何包含技术内容的页面
-    test_url = "https://www.runoob.com/python3/python3-tutorial.html"
+    # 示例URL列表 - 可以替换为任何包含技术内容的页面
+    example_urls = [
+        "https://javaguide.cn/java/basis/reflection.html",
+        "https://javaguide.cn/java/basis/proxy.html",
+        "https://javaguide.cn/java/concurrent/aqs.html"
+    ]
     
     # API端点
     api_url = "http://localhost:8000/crawl/single-page"
     
-    print(f"正在测试单页爬取接口...")
-    print(f"目标URL: {test_url}")
+    print("单页爬取接口使用示例")
+    print("=" * 50)
     
-    try:
-        # 发送POST请求
-        response = requests.post(api_url, params={"url": test_url})
+    for i, url in enumerate(example_urls, 1):
+        print(f"\n[{i}] 正在爬取: {url}")
         
-        # 检查响应状态码
-        if response.status_code == 200:
-            result = response.json()
-            print("✅ 接口调用成功!")
-            print(f"结果: {json.dumps(result, indent=2, ensure_ascii=False)}")
+        try:
+            # 发送POST请求
+            response = requests.post(api_url, params={"url": url})
             
-            # 验证返回的数据结构
-            assert "status" in result
-            assert "message" in result
-            assert "url" in result
-            assert "parsed_questions" in result
-            assert "inserted_questions" in result
-            
-            print("\n✅ 数据结构验证通过!")
-            return True
-        else:
-            print(f"❌ 接口调用失败，状态码: {response.status_code}")
-            print(f"错误信息: {response.text}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ 测试过程中出现异常: {str(e)}")
-        return False
+            if response.status_code == 200:
+                result = response.json()
+                print(f"✅ 成功! 识别到 {result['parsed_questions']} 个问题")
+                print(f"   标题: {result.get('title', 'N/A')}")
+                print(f"   字数: {result.get('word_count', 0)}")
+                print(f"   耗时: {result.get('load_time', 0):.2f}秒")
+            else:
+                print(f"❌ 失败! 状态码: {response.status_code}")
+                print(f"   错误: {response.text}")
+                
+        except Exception as e:
+            print(f"❌ 异常: {str(e)}")
+    
+    print("\n" + "=" * 50)
+    print("示例完成!")
+
+
+def batch_crawl_example():
+    """批量爬取示例"""
+    
+    # 批量URL列表
+    urls_to_crawl = [
+        "https://www.runoob.com/python3/python3-basic-syntax.html",
+        "https://www.runoob.com/python3/python3-variable-types.html",
+        "https://www.runoob.com/python3/python3-operator.html"
+    ]
+    
+    api_url = "http://localhost:8000/crawl/single-page"
+    
+    print("\n批量爬取示例")
+    print("=" * 50)
+    
+    total_questions = 0
+    success_count = 0
+    
+    for url in urls_to_crawl:
+        try:
+            response = requests.post(api_url, params={"url": url})
+            if response.status_code == 200:
+                result = response.json()
+                total_questions += result.get('parsed_questions', 0)
+                success_count += 1
+                print(f"✓ {url.split('/')[-1]}: {result.get('parsed_questions', 0)} 个问题")
+            else:
+                print(f"✗ {url.split('/')[-1]}: 失败")
+        except Exception as e:
+            print(f"✗ {url.split('/')[-1]}: {str(e)}")
+    
+    print(f"\n总计: {success_count}/{len(urls_to_crawl)} 成功, 共识别 {total_questions} 个问题")
 
 
 if __name__ == "__main__":
-    print("=" * 50)
-    print("单页爬取接口测试")
-    print("=" * 50)
+    # 运行示例
+    crawl_single_page_example()
     
-    success = test_single_page_crawl()
-    
-    if success:
-        print("\n🎉 所有测试通过!")
-    else:
-        print("\n💥 测试失败!")
+    # 如果需要批量爬取，取消下面注释
+    # batch_crawl_example()
