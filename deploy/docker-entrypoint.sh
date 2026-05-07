@@ -22,5 +22,5 @@ fi
 echo "后端服务已启动 (PID: $BACKEND_PID)"
 
 # 启动 Nginx（前台运行）
-echo "启动 Nginx（端口 80）..."
+echo "启动 Nginx（端口 9023）..."
 exec nginx -g 'daemon off;'
