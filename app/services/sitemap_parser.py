@@ -5,11 +5,14 @@ Sitemap 解析器模块
 支持标准站点地图 XML 格式和站点地图索引文件。
 """
 
+import logging
 from typing import List, Optional
 from urllib.parse import urlparse
 
 import requests
 from lxml import etree
+
+logger = logging.getLogger(__name__)
 
 
 class SitemapParser:
@@ -63,7 +66,16 @@ class SitemapParser:
         if self._xml_content is None:
             raise ValueError("Sitemap not fetched. Call fetch_sitemap() first.")
 
-        self._root = etree.fromstring(self._xml_content.encode('utf-8'))
+        # 使用恢复模式解析器处理不规范的XML
+        parser = etree.XMLParser(recover=True, encoding='utf-8')
+        try:
+            self._root = etree.fromstring(self._xml_content.encode('utf-8'), parser)
+        except Exception as e:
+            logger.error(f"XML解析失败: {str(e)}")
+            # 尝试清理XML内容
+            cleaned_xml = self._clean_xml_content(self._xml_content)
+            self._root = etree.fromstring(cleaned_xml.encode('utf-8'), parser)
+
         urls = []
 
         # Check if this is a sitemap index (contains <sitemap> elements)
@@ -177,3 +189,22 @@ class SitemapParser:
             return all([result.scheme, result.netloc])
         except Exception:
             return False
+
+    @staticmethod
+    def _clean_xml_content(xml_content: str) -> str:
+        """
+        清理XML内容，修复常见的格式问题。
+
+        参数:
+            xml_content: 原始XML内容
+
+        返回:
+            清理后的XML内容
+        """
+        import re
+
+        # 替换未转义的 & 字符（但保留 &amp;, &lt;, &gt; 等）
+        # 匹配不在实体引用中的 &
+        xml_content = re.sub(r'&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)', '&amp;', xml_content)
+
+        return xml_content

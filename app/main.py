@@ -271,7 +271,10 @@ async def get_crawl_status():
         if scheduler:
             jobs = scheduler.get_jobs()
             if jobs:
-                next_run = jobs[0].next_run_time
+                job = jobs[0]
+                # APScheduler 3.x 使用 next_run_time 属性
+                # APScheduler 4.x 可能需要不同的访问方式
+                next_run = getattr(job, 'next_run_time', None)
                 if next_run:
                     status_info["scheduler_config"]["next_run"] = next_run.strftime(
                         "%Y-%m-%d %H:%M:%S"
