@@ -21,9 +21,29 @@ export const crawlerApi = {
     return apiClient.put(`/scheduler-config?hour=${hour}&minute=${minute}`)
   },
 
-  // 手动触发批量爬取
+  // 手动触发批量爬取（同步，会阻塞）
   triggerCrawl() {
     return apiClient.get('/crawl/run')
+  },
+
+  // 异步触发批量爬取（立即返回任务ID）
+  triggerCrawlAsync() {
+    return apiClient.post('/crawl/run-async')
+  },
+
+  // 获取任务状态
+  getTaskStatus(taskId) {
+    return apiClient.get(`/crawl/task/${taskId}`)
+  },
+
+  // 停止任务
+  stopTask(taskId) {
+    return apiClient.post(`/crawl/stop/${taskId}`)
+  },
+
+  // 获取所有任务
+  getAllTasks() {
+    return apiClient.get('/crawl/tasks')
   },
 
   // 获取爬虫状态

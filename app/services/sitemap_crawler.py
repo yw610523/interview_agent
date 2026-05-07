@@ -166,6 +166,7 @@ class SitemapCrawler:
             sitemap_url: Optional[str] = None,
             progress_callback: Optional[Callable[[ScanResult, int, int], None]] = None,
             page_processed_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+            stop_flag=None,  # 新增：停止标志
     ) -> List[ScanResult]:
         """
         开始爬取操作。
@@ -174,6 +175,7 @@ class SitemapCrawler:
             sitemap_url: 可选的站点地图 URL（覆盖配置）
             progress_callback: 可选的进度更新回调函数
             page_processed_callback: 可选的页面处理完成回调函数，每扫描完一个URL立即调用
+            stop_flag: 可选的停止标志(threading.Event)，设置时中断爬取
 
         返回:
             ScanResult 对象列表
@@ -249,6 +251,11 @@ class SitemapCrawler:
         # Scan each URL
         logger.info("Starting URL scans...")
         for i, url in enumerate(urls):
+            # 检查是否应该停止
+            if stop_flag and stop_flag.is_set():
+                logger.info(f"爬取任务被用户中断 (已处理 {i}/{len(urls)} 个URL)")
+                break
+
             if self.config.verbose:
                 logger.info(f"Scanning URL {i + 1}/{len(urls)}: {url}")
 
@@ -291,12 +298,13 @@ class SitemapCrawler:
 
         return self._results
 
-    def crawl_urls(self, urls: List[str]) -> List[ScanResult]:
+    def crawl_urls(self, urls: List[str], stop_flag=None) -> List[ScanResult]:
         """
         爬取指定的 URL 列表，无需解析站点地图。
 
         参数:
             urls: 要爬取的 URL 列表
+            stop_flag: 可选的停止标志(threading.Event)，设置时中断爬取
 
         返回:
             ScanResult 对象列表
@@ -314,6 +322,11 @@ class SitemapCrawler:
         )
 
         for i, url in enumerate(urls):
+            # 检查是否应该停止
+            if stop_flag and stop_flag.is_set():
+                logger.info(f"爬取任务被用户中断 (已处理 {i}/{len(urls)} 个URL)")
+                break
+
             logger.info(f"Scanning URL {i + 1}/{len(urls)}: {url}")
             result = self._url_scanner.scan(url)
             self._results.append(result)
