@@ -17,6 +17,7 @@ from app.config.crawler_config import CrawlerConfig
 from .sitemap_parser import SitemapParser
 from .url_filter import URLFilter
 from .url_scanner import URLScanner, ScanResult
+from .firecrawl_mcp import FirecrawlMCPService, FirecrawlResult
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,83 @@ class SitemapCrawler:
         self._sitemap_parser: Optional[SitemapParser] = None
         self._url_scanner: Optional[URLScanner] = None
         self._url_filter: Optional[URLFilter] = None
+        self._firecrawl_service: Optional[FirecrawlMCPService] = None
+
+    def _init_firecrawl(self):
+        """
+        初始化 Firecrawl MCP 服务（如果配置启用）。
+        """
+        if not self.config.use_firecrawl:
+            return
+        
+        try:
+            firecrawl_config = {
+                "firecrawl_api_url": self.config.firecrawl_api_url,
+                "firecrawl_api_key": self.config.firecrawl_api_key,
+                "firecrawl_timeout": self.config.firecrawl_timeout,
+                "firecrawl_use_official": self.config.firecrawl_use_official,
+            }
+            self._firecrawl_service = FirecrawlMCPService.from_config(firecrawl_config)
+            
+            # 检查服务是否可用
+            if self._firecrawl_service.is_available():
+                logger.info("Firecrawl MCP 服务已连接")
+            else:
+                logger.warning("Firecrawl MCP 服务不可用，将回退到传统爬取方式")
+                self._firecrawl_service = None
+        except Exception as e:
+            logger.error(f"初始化 Firecrawl 失败: {str(e)}")
+            self._firecrawl_service = None
+
+    async def _scan_with_firecrawl(self, url: str) -> ScanResult:
+        """
+        使用 Firecrawl 扫描单个 URL（异步）。
+
+        参数:
+            url: 要扫描的 URL
+
+        返回:
+            ScanResult 对象
+        """
+        result = ScanResult(url)
+        import time
+        start_time = time.time()
+
+        try:
+            if not self._firecrawl_service:
+                result.error = "Firecrawl 服务未初始化"
+                result.load_time = time.time() - start_time
+                return result
+
+            # 调用 Firecrawl 进行爬取
+            firecrawl_result = await self._firecrawl_service.scrape_url(
+                url=url,
+                formats=["markdown", "html"],
+                only_main_content=self.config.firecrawl_only_main_content,
+            )
+
+            if firecrawl_result.success and firecrawl_result.markdown:
+                result.status_code = 200
+                result.content_type = "text/html"
+                result.title = firecrawl_result.title
+                result.text_content = firecrawl_result.markdown
+                result.html_content = firecrawl_result.html
+                result.word_count = len(result.text_content.split())
+                result.meta_description = firecrawl_result.metadata.get("description")
+                result.meta_keywords = firecrawl_result.metadata.get("keywords")
+                result.load_time = time.time() - start_time
+                logger.info(f"Firecrawl 成功解析: {url}")
+            else:
+                result.error = firecrawl_result.error or "Firecrawl 解析失败"
+                result.load_time = time.time() - start_time
+                logger.warning(f"Firecrawl 解析失败 {url}: {result.error}")
+
+        except Exception as e:
+            result.error = f"Firecrawl 异常: {str(e)}"
+            result.load_time = time.time() - start_time
+            logger.error(f"Firecrawl 扫描错误: {str(e)}")
+
+        return result
 
     @property
     def results(self) -> List[ScanResult]:
@@ -194,6 +272,9 @@ class SitemapCrawler:
 
         logger.info(f"Starting crawl for sitemap: {sitemap_url}")
 
+        # Initialize Firecrawl if enabled
+        self._init_firecrawl()
+
         # Initialize scanner first for robots.txt check
         self._url_scanner = URLScanner(
             timeout=self.config.timeout,
@@ -259,7 +340,13 @@ class SitemapCrawler:
             if self.config.verbose:
                 logger.info(f"Scanning URL {i + 1}/{len(urls)}: {url}")
 
-            result = self._url_scanner.scan(url)
+            # Use Firecrawl if enabled and available, otherwise use traditional scanner
+            if self._firecrawl_service:
+                import asyncio
+                result = asyncio.run(self._scan_with_firecrawl(url))
+            else:
+                result = self._url_scanner.scan(url)
+            
             self._results.append(result)
 
             if result.error:
@@ -314,6 +401,9 @@ class SitemapCrawler:
         self._results = []
         self.stats.total_urls = len(urls)
 
+        # Initialize Firecrawl if enabled
+        self._init_firecrawl()
+
         self._url_scanner = URLScanner(
             timeout=self.config.timeout,
             follow_redirects=self.config.follow_redirects,
@@ -328,7 +418,14 @@ class SitemapCrawler:
                 break
 
             logger.info(f"Scanning URL {i + 1}/{len(urls)}: {url}")
-            result = self._url_scanner.scan(url)
+            
+            # Use Firecrawl if enabled and available, otherwise use traditional scanner
+            if self._firecrawl_service:
+                import asyncio
+                result = asyncio.run(self._scan_with_firecrawl(url))
+            else:
+                result = self._url_scanner.scan(url)
+            
             self._results.append(result)
 
             if result.error:
