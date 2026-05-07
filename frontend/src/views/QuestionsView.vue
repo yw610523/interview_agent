@@ -51,9 +51,9 @@
         </a-card>
       </a-col>
 
-      <!-- 题目列表 -->
-      <a-col :span="24">
-        <a-card :bordered="false" class="results-card">
+      <!-- 题目列表（桌面端显示） -->
+      <a-col :span="24" class="desktop-results">
+        <a-card :bordered="false">
           <template #title>
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <span>📋 面试题列表 ({{ questions.length }})</span>
@@ -124,6 +124,76 @@
         </a-card>
       </a-col>
     </a-row>
+
+    <!-- 移动端结果模态框 -->
+    <a-modal
+      v-model:open="showResultsModal"
+      title=" 面试题列表"
+      :footer="null"
+      width="90%"
+      :body-style="{ maxHeight: '70vh', overflowY: 'auto', padding: '16px' }"
+      class="mobile-results-modal"
+    >
+      <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+        <span style="color: #666;">共 {{ questions.length }} 道题目</span>
+        <a-space>
+          <a-button size="small" @click="expandAll">
+            展开全部
+          </a-button>
+          <a-button size="small" @click="collapseAll">
+            收起全部
+          </a-button>
+        </a-space>
+      </div>
+
+      <a-collapse v-model:activeKey="activeKeys" accordion>
+        <a-collapse-panel 
+          v-for="(question, index) in questions" 
+          :key="index.toString()"
+        >
+          <template #header>
+            <div style="width: 100%;">
+              <strong>问题 {{ index + 1 }}: {{ question.title }}</strong>
+              <div style="margin-top: 8px;">
+                <a-tag color="blue" size="small">{{ question.difficulty || 'medium' }}</a-tag>
+                <a-tag v-if="question.category" color="green" size="small">{{ question.category }}</a-tag>
+                <a-tag v-for="tag in (question.tags || [])" :key="tag" color="purple" size="small">
+                  {{ tag }}
+                </a-tag>
+              </div>
+            </div>
+          </template>
+
+          <div class="answer-content">
+            <MarkdownRenderer :content="question.answer" />
+            
+            <a-divider />
+            
+            <div class="question-meta">
+              <a-space direction="vertical" size="small">
+                <div>
+                  <strong>来源:</strong> 
+                  <a :href="question.source_url" target="_blank">
+                    {{ question.source_url }}
+                  </a>
+                </div>
+                <div v-if="question.importance_score">
+                  <strong>重要性评分:</strong> 
+                  <a-progress 
+                    :percent="Math.round(question.importance_score * 100)" 
+                    :stroke-color="{
+                      '0%': '#108ee9',
+                      '100%': '#87d068',
+                    }"
+                    style="width: 100%; margin-top: 8px;"
+                  />
+                </div>
+              </a-space>
+            </div>
+          </div>
+        </a-collapse-panel>
+      </a-collapse>
+    </a-modal>
   </div>
 </template>
 
@@ -150,6 +220,7 @@ const difficultyOptions = [
 const generating = ref(false)
 const questions = ref([])
 const activeKeys = ref([])
+const showResultsModal = ref(false)
 
 // 生成面试题
 const generateQuestions = async () => {
@@ -168,13 +239,10 @@ const generateQuestions = async () => {
       questions.value = res.questions
       message.success(`成功生成 ${res.count} 道面试题`)
       
-      // Scroll to results after generation
-      setTimeout(() => {
-        const resultsCard = document.querySelector('.results-card')
-        if (resultsCard) {
-          resultsCard.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        }
-      }, 100)
+      // 在移动端打开模态框
+      if (window.innerWidth <= 768 && res.count > 0) {
+        showResultsModal.value = true
+      }
       
       if (res.count === 0) {
         message.warning('没有找到符合条件的题目，请调整筛选条件')
@@ -214,33 +282,16 @@ const collapseAll = () => {
 .questions-view {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  height: calc(100vh - 64px - 48px);
-}
-
-.form-card {
-  flex-shrink: 0;
-  margin-bottom: 16px;
-}
-
-.results-card {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
+  padding: 24px;
 }
 
 @media (max-width: 768px) {
   .questions-view {
     padding: 8px;
-    height: calc(100vh - 56px - 40px);
   }
   
-  .form-card {
-    margin-bottom: 8px;
+  .desktop-results {
+    display: none;
   }
   
   .mobile-form {
@@ -280,7 +331,7 @@ const collapseAll = () => {
 
 /* 题目列表容器 - 添加滚动条 */
 .questions-container {
-  flex: 1;
+  max-height: calc(100vh - 400px);
   overflow-y: auto;
   padding-right: 8px;
   padding-bottom: 20px;
@@ -316,5 +367,24 @@ const collapseAll = () => {
 /* 确保下拉菜单不被遮挡 */
 :deep(.ant-select-dropdown) {
   z-index: 9999 !important;
+}
+
+/* 移动端模态框样式 */
+:deep(.mobile-results-modal .ant-modal) {
+  top: 20px;
+  max-width: 100%;
+}
+
+:deep(.mobile-results-modal .ant-modal-content) {
+  border-radius: 12px;
+}
+
+:deep(.mobile-results-modal .ant-modal-header) {
+  border-radius: 12px 12px 0 0;
+  padding: 16px 20px;
+}
+
+:deep(.mobile-results-modal .ant-modal-body) {
+  padding: 0;
 }
 </style>
