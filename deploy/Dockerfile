@@ -29,16 +29,21 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # 再复制应用代码(代码变更不会导致依赖重新安装)
 COPY app/ ./app/
 
-# 最终运行阶段 - 使用 Nginx 提供前端和反向代理
-FROM docker.m.daocloud.io/nginx:alpine
+# 最终运行阶段 - 使用完整 Python 镜像 + 安装 Nginx
+FROM docker.m.daocloud.io/library/python:3.10-slim
+
+# 安装 Nginx
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nginx \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # 复制后端代码、依赖和前端构建产物
 COPY --from=backend-builder /app /app
-COPY --from=backend-builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
-COPY --from=backend-builder /usr/local/bin /usr/local/bin
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
 
 # 配置 Nginx 和启动脚本
+RUN rm /etc/nginx/sites-enabled/default
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 COPY deploy/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
