@@ -225,9 +225,10 @@ const collapseAll = () => {
 
 /* 题目列表容器 - 添加滚动条 */
 .questions-container {
-  max-height: calc(100vh - 280px);
+  max-height: calc(100vh - 320px);
   overflow-y: auto;
   padding-right: 8px;
+  padding-bottom: 20px;
 }
 
 /* 自定义滚动条样式 */
