@@ -19,9 +19,7 @@ services:
 
   # Interview Agent 应用
   app:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    image: ghcr.io/yw610523/interview_agent:latest
     container_name: interview-agent
     ports:
       - "${APP_PORT:-9023}:9023"  # 前端访问端口
