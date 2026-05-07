@@ -1,4 +1,4 @@
-# 多阶段构建 - 前端构建阶段
+# 前端构建阶段
 FROM docker.m.daocloud.io/library/node:18-alpine AS frontend-builder
 
 WORKDIR /app/frontend
@@ -11,26 +11,12 @@ RUN npm install --production=false
 COPY frontend/ ./
 RUN npm run build
 
-# 后端构建阶段 - 使用完整Python镜像（预装编译工具）
-FROM docker.m.daocloud.io/library/python:3.10 AS backend-builder
-
-# 设置工作目录和环境变量
-WORKDIR /app
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# 先复制并安装 Python 依赖(利用 Docker 层缓存)
-COPY requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-
-# 再复制应用代码(代码变更不会导致依赖重新安装)
-COPY app/ ./app/
-
-# 最终运行阶段 - 使用完整 Python 镜像 + 安装 Nginx
+# 最终运行阶段 - 使用 Python slim 镜像 + 安装 Nginx
 FROM docker.m.daocloud.io/library/python:3.10-slim
+
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 # 安装 Nginx
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -38,8 +24,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制后端代码、依赖和前端构建产物
-COPY --from=backend-builder /app /app
+# 设置工作目录
+WORKDIR /app
+
+# 先复制 requirements.txt 并安装依赖
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# 复制后端代码和前端构建产物
+COPY app/ ./app/
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
 
 # 配置 Nginx 和启动脚本

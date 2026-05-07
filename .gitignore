@@ -28,6 +28,8 @@ frontend/node_modules/
 frontend/dist/
 dist/
 build/
+node_modules/
+.trae/
 *.egg-info/
 .idea/
 .vscode/
