@@ -389,7 +389,7 @@ class SitemapCrawler:
         # Calculate average load time
         if self.stats.successful_scans > 0:
             summary['avg_load_time'] = (
-                    self.stats.total_load_time / self.stats.successful_scans
+                self.stats.total_load_time / self.stats.successful_scans
             )
 
         return summary
