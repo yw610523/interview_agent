@@ -50,6 +50,14 @@ class CrawlerConfig:
     verbose: bool = True
     url_include_patterns: list = field(default_factory=list)
     url_exclude_patterns: list = field(default_factory=list)
+    
+    # Firecrawl MCP 配置
+    use_firecrawl: bool = False  # 是否启用 Firecrawl
+    firecrawl_api_url: str = "http://firecrawl:3002"  # Firecrawl 服务地址
+    firecrawl_api_key: Optional[str] = None  # Firecrawl API Key（可选）
+    firecrawl_timeout: int = 60  # Firecrawl 请求超时时间
+    firecrawl_use_official: bool = False  # 是否使用官方 API
+    firecrawl_only_main_content: bool = True  # 是否只提取主要内容
 
     def to_dict(self) -> Dict[str, Any]:
         """将配置转换为字典。"""
@@ -133,6 +141,25 @@ def get_config_from_env() -> CrawlerConfig:
             config.url_exclude_patterns = json.loads(exclude_patterns)
         except json.JSONDecodeError as e:
             logging.warning(f"解析CRAWLER_URL_EXCLUDE_PATTERNS失败: {str(e)}")
+
+    # 从环境变量读取 Firecrawl 配置
+    if use_firecrawl := os.getenv('FIRECRAWL_ENABLED'):
+        config.use_firecrawl = use_firecrawl.lower() in ('true', '1', 'yes')
+    
+    if firecrawl_api_url := os.getenv('FIRECRAWL_API_URL'):
+        config.firecrawl_api_url = firecrawl_api_url
+    
+    if firecrawl_api_key := os.getenv('FIRECRAWL_API_KEY'):
+        config.firecrawl_api_key = firecrawl_api_key
+    
+    if firecrawl_timeout := os.getenv('FIRECRAWL_TIMEOUT'):
+        config.firecrawl_timeout = int(firecrawl_timeout)
+    
+    if firecrawl_use_official := os.getenv('FIRECRAWL_USE_OFFICIAL'):
+        config.firecrawl_use_official = firecrawl_use_official.lower() in ('true', '1', 'yes')
+    
+    if firecrawl_only_main_content := os.getenv('FIRECRAWL_ONLY_MAIN_CONTENT'):
+        config.firecrawl_only_main_content = firecrawl_only_main_content.lower() in ('true', '1', 'yes')
 
     return config
 
