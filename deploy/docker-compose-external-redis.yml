@@ -3,7 +3,9 @@ version: '3.8'
 services:
   # Interview Agent 应用（使用外置 Redis）
   app:
-    build: .
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
     container_name: interview-agent
     ports:
       - "${APP_PORT:-80}:80"  # 前端访问端口
