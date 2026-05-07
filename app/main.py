@@ -14,11 +14,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, HttpUrl
 
-from app.config.crawler_config import (
-    CrawlerConfig,
-    get_config_from_env,
-    get_scheduler_config,
-)
+from app.config.config_manager import get_config
+from app.config.crawler_config import CrawlerConfig
 # 导入配置热加载管理器
 from app.services.config_hot_reload import config_reload_manager
 # 导入大模型和向量服务
@@ -40,6 +37,9 @@ last_crawl_result: Optional[Dict[str, Any]] = None
 
 # SSE日志队列（用于单页爬取的实时日志推送）
 sse_log_queues: Dict[str, Queue] = {}
+
+# 初始化配置管理器
+config = get_config()
 
 # 初始化服务
 llm_service = LLMService()
@@ -118,20 +118,15 @@ def run_crawler() -> Dict[str, Any]:
 
     try:
         # 加载配置
-        DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
+        crawler_config_dict = config.get_crawler_config()
+        crawler_config = CrawlerConfig.from_dict(crawler_config_dict)
 
-        if DEFAULT_CONFIG_PATH.exists():
-            logger.info(f"使用默认配置文件: {DEFAULT_CONFIG_PATH}")
-            config = CrawlerConfig.from_json(str(DEFAULT_CONFIG_PATH))
-        else:
-            config = get_config_from_env()
-
-        if not config.sitemap_url:
+        if not crawler_config.sitemap_url:
             logger.error("配置错误：未指定 Sitemap URL")
             return {"status": "error", "message": "未指定 Sitemap URL"}
 
         # 创建并运行爬虫
-        crawler = SitemapCrawler(config=config)
+        crawler = SitemapCrawler(config=crawler_config)
 
         # 统计已插入的问题数量
         inserted_count = 0
@@ -183,7 +178,7 @@ def run_crawler() -> Dict[str, Any]:
         crawler.print_report()
 
         # 保存结果
-        if config.save_results:
+        if crawler_config.save_results:
             filepath = crawler.save_results()
             logger.info(f"结果已保存到: {filepath}")
 
@@ -1068,16 +1063,10 @@ async def get_crawler_config():
     获取当前爬虫配置
     """
     try:
-        DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
-
-        if DEFAULT_CONFIG_PATH.exists():
-            config = CrawlerConfig.from_json(str(DEFAULT_CONFIG_PATH))
-        else:
-            config = get_config_from_env()
-
+        crawler_config_dict = config.get_crawler_config()
         return {
             "status": "success",
-            "config": config.to_dict()
+            "config": crawler_config_dict
         }
     except Exception as e:
         logger.error(f"获取配置失败: {str(e)}")
@@ -1087,23 +1076,22 @@ async def get_crawler_config():
 @app.put("/api/config", summary="更新爬虫配置")
 async def update_crawler_config(config_data: Dict[str, Any]):
     """
-    更新爬虫配置并保存到文件
+    更新爬虫配置并保存到YAML文件
     """
     try:
-        DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
-
-        # 创建新配置
-        config = CrawlerConfig.from_dict(config_data)
-
-        # 保存到文件
-        config.to_json(str(DEFAULT_CONFIG_PATH))
-
-        logger.info(f"配置已更新并保存到: {DEFAULT_CONFIG_PATH}")
+        # 更新配置
+        for key, value in config_data.items():
+            config.set(f'crawler.{key}', value)
+        
+        # 保存到YAML文件
+        config.save()
+        
+        logger.info("爬虫配置已更新并保存到 config.yaml")
 
         return {
             "status": "success",
             "message": "配置更新成功",
-            "config": config.to_dict()
+            "config": config.get_crawler_config()
         }
     except Exception as e:
         logger.error(f"更新配置失败: {str(e)}")
@@ -1116,10 +1104,10 @@ async def get_scheduler_config_api():
     获取定时任务配置
     """
     try:
-        config = get_scheduler_config()
+        scheduler_cfg = config.get_scheduler_config()
         return {
             "status": "success",
-            "config": config
+            "config": scheduler_cfg
         }
     except Exception as e:
         logger.error(f"获取定时配置失败: {str(e)}")
@@ -1132,6 +1120,11 @@ async def update_scheduler_config(hour: int, minute: int):
     更新定时任务配置（支持热加载，无需重启）
     """
     try:
+        # 更新YAML配置
+        config.set('scheduler.hour', hour)
+        config.set('scheduler.minute', minute)
+        config.save()
+        
         # 热加载定时任务配置
         reload_success = config_reload_manager.reload_scheduler_config(scheduler, hour, minute)
 
@@ -1155,29 +1148,13 @@ async def update_llm_config(config_data: Dict[str, Any]):
     更新模型配置（支持热加载，无需重启）
     """
     try:
-        import os
-        from dotenv import set_key, find_dotenv
-
-        # 加载环境变量
-        dotenv_path = find_dotenv()
-        if not dotenv_path:
-            dotenv_path = '.env'
-
-        # 更新.env文件中的配置
+        # 更新YAML配置
         for key, value in config_data.items():
-            env_key = key.upper()
             if value is not None and value != '':
-                set_key(dotenv_path, env_key, str(value))
-            else:
-                # 如果值为空，删除该配置项
-                if os.getenv(env_key):
-                    # 读取文件并删除对应行
-                    with open(dotenv_path, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()
-                    with open(dotenv_path, 'w', encoding='utf-8') as f:
-                        for line in lines:
-                            if not line.startswith(f'{env_key}='):
-                                f.write(line)
+                config.set(f'llm.{key}', value)
+        
+        # 保存到YAML文件
+        config.save()
 
         # 热加载配置
         reload_success = config_reload_manager.reload_llm_config()
@@ -1186,7 +1163,7 @@ async def update_llm_config(config_data: Dict[str, Any]):
             "status": "success",
             "message": "模型配置已更新" + ("（已热加载，立即生效）" if reload_success else "（请重启服务使配置生效）"),
             "hot_reload": reload_success,
-            "config": config_data
+            "config": config.get_llm_config()
         }
     except Exception as e:
         logger.error(f"更新模型配置失败: {str(e)}")
@@ -1199,20 +1176,14 @@ async def update_redis_config(config_data: Dict[str, Any]):
     更新Redis配置（支持热加载，无需重启）
     """
     try:
-        from dotenv import set_key, find_dotenv
-
         # 获取redis_url
         redis_url = config_data.get('redis_url')
         if not redis_url:
             raise HTTPException(status_code=400, detail="缺少redis_url参数")
 
-        # 加载环境变量
-        dotenv_path = find_dotenv()
-        if not dotenv_path:
-            dotenv_path = '.env'
-
-        # 更新REDIS_URL
-        set_key(dotenv_path, 'REDIS_URL', redis_url)
+        # 更新YAML配置
+        config.set('redis.url', redis_url)
+        config.save()
 
         # 热加载配置
         reload_success = config_reload_manager.reload_redis_config()
@@ -1236,27 +1207,22 @@ async def update_email_config(config_data: Dict[str, Any]):
     更新邮件配置（支持热加载，无需重启）
     """
     try:
-        from dotenv import set_key, find_dotenv
-
-        # 加载环境变量
-        dotenv_path = find_dotenv()
-        if not dotenv_path:
-            dotenv_path = '.env'
-
-        # 更新邮件配置
+        # 更新YAML配置
         email_mapping = {
-            'smtp_server': 'SMTP_SERVER',
-            'smtp_port': 'SMTP_PORT',
-            'smtp_user': 'SMTP_USER',
-            'smtp_password': 'SMTP_PASSWORD',
-            'smtp_test_user': 'SMTP_TEST_USER'
+            'smtp_server': 'email.smtp_server',
+            'smtp_port': 'email.smtp_port',
+            'smtp_user': 'email.smtp_user',
+            'smtp_password': 'email.smtp_password',
+            'smtp_test_user': 'email.test_user'
         }
 
         for key, value in config_data.items():
             if key in email_mapping:
-                env_key = email_mapping[key]
                 if value is not None and value != '' and value != '********':
-                    set_key(dotenv_path, env_key, str(value))
+                    config.set(email_mapping[key], value)
+        
+        # 保存到YAML文件
+        config.save()
 
         # 热加载配置
         reload_success = config_reload_manager.reload_email_config()
@@ -1265,7 +1231,7 @@ async def update_email_config(config_data: Dict[str, Any]):
             "status": "success",
             "message": "邮件配置已更新" + ("（已热加载，立即生效）" if reload_success else "（请重启服务使配置生效）"),
             "hot_reload": reload_success,
-            "config": config_data
+            "config": config.get_email_config()
         }
     except Exception as e:
         logger.error(f"更新邮件配置失败: {str(e)}")
@@ -1322,53 +1288,17 @@ async def get_system_config():
     获取所有系统配置（按类别分组）
     """
     try:
-        import os
-        from dotenv import load_dotenv
-        load_dotenv()
-
-        # 爬虫配置
-        DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
-        if DEFAULT_CONFIG_PATH.exists():
-            crawler_config = CrawlerConfig.from_json(str(DEFAULT_CONFIG_PATH))
-        else:
-            crawler_config = get_config_from_env()
-
-        # 模型配置
-        llm_config = {
-            "openai_api_key": os.getenv("OPENAI_API_KEY", ""),
-            "openai_api_base": os.getenv("OPENAI_API_BASE", ""),
-            "openai_model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            "openai_embedding_model": os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
-            "embedding_dimension": int(os.getenv("EMBEDDING_DIMENSION", "1536")),
-            "model_max_input_tokens": os.getenv("MODEL_MAX_INPUT_TOKENS", ""),
-            "model_max_output_tokens": os.getenv("MODEL_MAX_OUTPUT_TOKENS", ""),
-        }
-
-        # Redis配置
-        redis_config = {
-            "redis_url": os.getenv("REDIS_URL", "redis://localhost:6379"),
-        }
-
-        # 邮件配置
-        email_config = {
-            "smtp_server": os.getenv("SMTP_SERVER", ""),
-            "smtp_port": int(os.getenv("SMTP_PORT", "587")),
-            "smtp_user": os.getenv("SMTP_USER", ""),
-            "smtp_password": os.getenv("SMTP_PASSWORD", ""),
-            "smtp_test_user": os.getenv("SMTP_TEST_USER", ""),
-        }
-
-        # 定时任务配置
-        scheduler_cfg = get_scheduler_config()
-
+        # 从YAML配置获取所有配置
+        all_config = config.to_dict()
+        
         return {
             "status": "success",
             "config": {
-                "crawler": crawler_config.to_dict(),
-                "llm": llm_config,
-                "redis": redis_config,
-                "email": email_config,
-                "scheduler": scheduler_cfg,
+                "crawler": all_config.get('crawler', {}),
+                "llm": all_config.get('llm', {}),
+                "redis": all_config.get('redis', {}),
+                "email": all_config.get('email', {}),
+                "scheduler": all_config.get('scheduler', {}),
             }
         }
     except Exception as e:
@@ -1379,10 +1309,10 @@ async def get_system_config():
 # 定时任务调度器
 scheduler = BackgroundScheduler()
 
-# 从环境变量获取定时配置
-scheduler_config = get_scheduler_config()
-SCHEDULER_HOUR = scheduler_config["hour"]
-SCHEDULER_MINUTE = scheduler_config["minute"]
+# 从YAML配置获取定时配置
+scheduler_cfg = config.get_scheduler_config()
+SCHEDULER_HOUR = scheduler_cfg.get("hour", 22)
+SCHEDULER_MINUTE = scheduler_cfg.get("minute", 0)
 
 
 # 添加定时任务：每天指定时间执行

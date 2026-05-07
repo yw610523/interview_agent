@@ -6,14 +6,10 @@
 
 import json
 import logging
-import os
 from dataclasses import dataclass
 from typing import List, Dict, Any
 
-from dotenv import load_dotenv
-
-logger = logging.getLogger(__name__)
-load_dotenv()
+from app.config.config_manager import get_config
 
 # 尝试导入不同的大模型库
 try:
