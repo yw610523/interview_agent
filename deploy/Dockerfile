@@ -43,12 +43,12 @@ COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 COPY deploy/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-# 暴露端口（Nginx 默认 80）
-EXPOSE 80
+# 暴露端口（默认 9023）
+EXPOSE 9023
 
 # 健康检查（使用wget代替curl，nginx:alpine自带wget）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget -qO- http://localhost:80/ || exit 1
+    CMD wget -qO- http://localhost:9023/ || exit 1
 
 # 启动命令
 ENTRYPOINT ["/docker-entrypoint.sh"]
