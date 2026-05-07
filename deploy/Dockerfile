@@ -1,5 +1,5 @@
 # 多阶段构建 - 前端构建阶段
-FROM node:18-alpine AS frontend-builder
+FROM docker.m.daocloud.io/library/node:18-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -37,7 +37,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY app/ ./app/
 
 # 最终运行阶段 - 使用 Nginx 提供前端和反向代理
-FROM nginx:alpine
+FROM docker.m.daocloud.io/library/nginx:alpine
 
 # 安装必要的工具
 RUN apk add --no-cache python3 py3-pip curl
