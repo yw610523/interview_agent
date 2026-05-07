@@ -3,27 +3,13 @@
 pipeline {
     agent any
     
-    environment {
-        DEPLOY_DIR = '/data/interview_agent'
-    }
-    
     stages {
-        stage('Pull Latest Code') {
+        stage('Checkout Code') {
             steps {
                 script {
                     echo "📥 拉取最新代码..."
-                    
-                    sh """
-                        mkdir -p ${DEPLOY_DIR}
-                        cd ${DEPLOY_DIR}
-                        
-                        # 如果已存在git仓库，则pull；否则clone
-                        if [ -d .git ]; then
-                            git pull origin main
-                        else
-                            git clone https://github.com/yw610523/interview_agent.git .
-                        fi
-                    """
+                    // Jenkins 会自动 checkout 代码到工作空间
+                    checkout scm
                 }
             }
         }
@@ -34,7 +20,6 @@ pipeline {
                     echo "🚀 执行部署脚本..."
                     
                     sh """
-                        cd ${DEPLOY_DIR}
                         chmod +x deploy/ci.sh
                         ./deploy/ci.sh
                     """

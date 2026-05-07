@@ -24,11 +24,11 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# 获取脚本所在目录
+# 获取脚本所在目录和项目根目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEPLOY_DIR="${SCRIPT_DIR}/deploy"
-ENV_FILE="${SCRIPT_DIR}/.env"
-ENV_TEMPLATE="${SCRIPT_DIR}/.env.template"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+ENV_FILE="${PROJECT_DIR}/.env"
+ENV_TEMPLATE="${PROJECT_DIR}/.env.template"
 
 log_info "========================================="
 log_info "开始部署 Interview Agent"
@@ -81,7 +81,7 @@ if [ ! -f "$ENV_FILE" ]; then
         log_error "  vim $ENV_FILE"
         log_error ""
         log_error "然后重新运行部署脚本或手动执行："
-        log_error "  cd $DEPLOY_DIR && docker-compose up -d"
+        log_error "  cd $SCRIPT_DIR && docker-compose up -d"
         exit 1
     fi
     
@@ -92,14 +92,14 @@ fi
 
 # 步骤 2: 进入部署目录
 log_info "步骤 2: 进入部署目录..."
-cd "$DEPLOY_DIR"
+cd "$SCRIPT_DIR"
 
 if [ ! -f "docker-compose.yml" ]; then
     log_error "docker-compose.yml 文件不存在！"
     exit 1
 fi
 
-log_info "✅ 部署目录: $DEPLOY_DIR"
+log_info "✅ 部署目录: $SCRIPT_DIR"
 
 # 步骤 3: 拉取最新镜像（可选，如果需要从远程仓库拉取）
 log_info "步骤 3: 拉取最新 Docker 镜像..."
@@ -162,7 +162,7 @@ log_info "  - 前端界面: http://localhost:80"
 log_info "  - API 文档: http://localhost:80/docs"
 log_info ""
 log_info "查看日志:"
-log_info "  cd $DEPLOY_DIR && docker-compose logs -f app"
+log_info "  cd $SCRIPT_DIR && docker-compose logs -f app"
 log_info "========================================="
 
 exit 0
