@@ -505,6 +505,21 @@ onMounted(() => {
 .settings-view {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 16px;
+}
+
+@media (max-width: 768px) {
+  .settings-view {
+    padding: 8px;
+  }
+  
+  :deep(.ant-tabs-nav) {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+  
+  :deep(.ant-form-item-label) {
+    text-align: left;
+  }
 }
 </style>

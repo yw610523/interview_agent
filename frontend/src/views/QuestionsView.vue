@@ -4,7 +4,7 @@
       <!-- 生成配置 -->
       <a-col :span="24">
         <a-card title="🎲 生成面试题" :bordered="false">
-          <a-form layout="inline">
+          <a-form layout="inline" class="mobile-form">
             <a-form-item label="题目数量">
               <a-input-number 
                 v-model:value="questionCount" 
@@ -206,7 +206,33 @@ const collapseAll = () => {
 .questions-view {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 16px;
+}
+
+@media (max-width: 768px) {
+  .questions-view {
+    padding: 8px;
+  }
+  
+  .mobile-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .mobile-form :deep(.ant-form-item) {
+    margin-bottom: 12px;
+    width: 100%;
+  }
+  
+  .mobile-form :deep(.ant-form-item-control) {
+    width: 100%;
+  }
+  
+  .mobile-form :deep(.ant-input-number),
+  .mobile-form :deep(.ant-select),
+  .mobile-form :deep(.ant-input) {
+    width: 100% !important;
+  }
 }
 
 .answer-content {

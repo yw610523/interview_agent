@@ -4,13 +4,14 @@
       <a-layout style="height: 100vh">
         <a-layout-header class="header">
           <div class="logo">
-            <h1 style="color: white; margin: 0;">🎯 Interview AI Agent</h1>
+            <h1 style="color: white; margin: 0; font-size: 1.2rem;">🎯 Interview AI</h1>
           </div>
           <a-menu
             v-model:selectedKeys="selectedKeys"
             theme="dark"
             mode="horizontal"
             :style="{ lineHeight: '64px' }"
+            class="desktop-menu"
           >
             <a-menu-item key="/">
               <router-link to="/">首页</router-link>
@@ -25,7 +26,39 @@
               <router-link to="/settings">系统设置</router-link>
             </a-menu-item>
           </a-menu>
+          <div class="mobile-menu-toggle" @click="toggleMobileMenu">
+            <MenuOutlined />
+          </div>
         </a-layout-header>
+        
+        <!-- Mobile Menu Drawer -->
+        <a-drawer
+          v-model:open="mobileMenuVisible"
+          title="菜单"
+          placement="right"
+          :width="250"
+          class="mobile-drawer"
+        >
+          <a-menu
+            v-model:selectedKeys="selectedKeys"
+            theme="light"
+            mode="inline"
+            @click="handleMobileMenuClick"
+          >
+            <a-menu-item key="/">
+              <router-link to="/">首页</router-link>
+            </a-menu-item>
+            <a-menu-item key="/crawler">
+              <router-link to="/crawler">爬虫管理</router-link>
+            </a-menu-item>
+            <a-menu-item key="/questions">
+              <router-link to="/questions">面试题生成</router-link>
+            </a-menu-item>
+            <a-menu-item key="/settings">
+              <router-link to="/settings">系统设置</router-link>
+            </a-menu-item>
+          </a-menu>
+        </a-drawer>
         
         <a-layout-content style="padding: 0; background: #ffffff; overflow: hidden;">
           <router-view />
@@ -40,12 +73,26 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
+import { MenuOutlined } from '@ant-design/icons-vue'
 
 const route = useRoute()
 const selectedKeys = ref([route.path])
+const mobileMenuVisible = ref(false)
+
+watch(() => route.path, (newPath) => {
+  selectedKeys.value = [newPath]
+})
+
+const toggleMobileMenu = () => {
+  mobileMenuVisible.value = !mobileMenuVisible.value
+}
+
+const handleMobileMenuClick = () => {
+  mobileMenuVisible.value = false
+}
 </script>
 
 <style>
@@ -69,5 +116,31 @@ html, body {
 
 .logo {
   margin-right: 48px;
+}
+
+.mobile-menu-toggle {
+  display: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 12px;
+}
+
+@media (max-width: 768px) {
+  .desktop-menu {
+    display: none;
+  }
+  
+  .mobile-menu-toggle {
+    display: block;
+  }
+  
+  .logo h1 {
+    font-size: 1rem;
+  }
+  
+  .header {
+    padding: 0 16px;
+  }
 }
 </style>

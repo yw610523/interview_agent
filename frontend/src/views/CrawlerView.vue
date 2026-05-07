@@ -106,8 +106,8 @@
                 <a-form-item label="页面URL" style="width: 100%;">
                   <a-input
                     v-model:value="singlePageUrl"
-                    placeholder="输入要爬取的页面URL，例如: https://www.runoob.com/python3/python3-tutorial.html"
-                    style="width: 600px;"
+                    placeholder="输入要爬取的页面URL"
+                    style="width: 100%; max-width: 600px;"
                   />
                 </a-form-item>
                 <a-form-item>
@@ -499,7 +499,29 @@ onUnmounted(() => {
 .crawler-view {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 16px;
+}
+
+@media (max-width: 768px) {
+  .crawler-view {
+    padding: 8px;
+  }
+  
+  :deep(.ant-descriptions-item-label),
+  :deep(.ant-descriptions-item-content) {
+    display: block;
+    width: 100% !important;
+  }
+  
+  :deep(.ant-form-inline) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  :deep(.ant-form-item) {
+    margin-bottom: 12px;
+    width: 100%;
+  }
 }
 
 .log-container {

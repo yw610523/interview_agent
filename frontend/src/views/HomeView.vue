@@ -174,11 +174,23 @@ onMounted(() => {
 .home-view {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 16px;
   height: calc(100vh - 64px - 48px);
   display: flex;
   flex-direction: column;
   background: #ffffff;
+}
+
+@media (max-width: 768px) {
+  .home-view {
+    padding: 8px;
+    height: calc(100vh - 56px - 40px);
+  }
+  
+  .hero-image svg {
+    width: 120px;
+    height: 75px;
+  }
 }
 
 .search-container {
