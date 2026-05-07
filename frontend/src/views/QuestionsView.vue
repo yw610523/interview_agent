@@ -3,7 +3,7 @@
     <a-row :gutter="[24, 24]">
       <!-- 生成配置 -->
       <a-col :span="24">
-        <a-card title="🎲 生成面试题" :bordered="false">
+        <a-card title=" 生成面试题" :bordered="false" class="form-card">
           <a-form layout="inline" class="mobile-form">
             <a-form-item label="题目数量">
               <a-input-number 
@@ -53,7 +53,7 @@
 
       <!-- 题目列表 -->
       <a-col :span="24">
-        <a-card :bordered="false">
+        <a-card :bordered="false" class="results-card">
           <template #title>
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <span>📋 面试题列表 ({{ questions.length }})</span>
@@ -168,6 +168,14 @@ const generateQuestions = async () => {
       questions.value = res.questions
       message.success(`成功生成 ${res.count} 道面试题`)
       
+      // Scroll to results after generation
+      setTimeout(() => {
+        const resultsCard = document.querySelector('.results-card')
+        if (resultsCard) {
+          resultsCard.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+      }, 100)
+      
       if (res.count === 0) {
         message.warning('没有找到符合条件的题目，请调整筛选条件')
       }
@@ -207,11 +215,32 @@ const collapseAll = () => {
   max-width: 1200px;
   margin: 0 auto;
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 64px - 48px);
+}
+
+.form-card {
+  flex-shrink: 0;
+  margin-bottom: 16px;
+}
+
+.results-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 @media (max-width: 768px) {
   .questions-view {
     padding: 8px;
+    height: calc(100vh - 56px - 40px);
+  }
+  
+  .form-card {
+    margin-bottom: 8px;
   }
   
   .mobile-form {
@@ -251,7 +280,7 @@ const collapseAll = () => {
 
 /* 题目列表容器 - 添加滚动条 */
 .questions-container {
-  max-height: calc(100vh - 400px);
+  flex: 1;
   overflow-y: auto;
   padding-right: 8px;
   padding-bottom: 20px;
