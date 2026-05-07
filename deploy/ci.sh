@@ -81,7 +81,7 @@ if [ ! -f "$ENV_FILE" ]; then
         log_error "  vim $ENV_FILE"
         log_error ""
         log_error "然后重新运行部署脚本或手动执行："
-        log_error "  cd $SCRIPT_DIR && docker-compose up -d"
+        log_error "  cd $SCRIPT_DIR && docker compose up -d"
         exit 1
     fi
     
@@ -103,7 +103,7 @@ log_info "✅ 部署目录: $SCRIPT_DIR"
 
 # 步骤 3: 拉取最新镜像（可选，如果需要从远程仓库拉取）
 log_info "步骤 3: 拉取最新 Docker 镜像..."
-if docker-compose pull app 2>/dev/null; then
+if docker compose pull app 2>/dev/null; then
     log_info "✅ 镜像拉取成功"
 else
     log_warn "镜像拉取失败或不需要拉取，将继续使用本地镜像"
@@ -111,12 +111,12 @@ fi
 
 # 步骤 4: 停止旧容器
 log_info "步骤 4: 停止旧容器..."
-docker-compose down --remove-orphans || true
+docker compose down --remove-orphans || true
 log_info "✅ 旧容器已停止"
 
 # 步骤 5: 启动新容器
 log_info "步骤 5: 启动新容器..."
-docker-compose up -d
+docker compose up -d
 
 if [ $? -eq 0 ]; then
     log_info "✅ 容器启动成功"
@@ -141,7 +141,7 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$IS_HEALTHY" = false ]; do
         RETRY_COUNT=$((RETRY_COUNT + 1))
         if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
             log_error "❌ 健康检查失败，服务可能未正常启动"
-            log_error "请查看容器日志: docker-compose logs app"
+            log_error "请查看容器日志: docker compose logs app"
             exit 1
         fi
         log_warn "⏳ 健康检查失败，重试 ${RETRY_COUNT}/${MAX_RETRIES}..."
@@ -162,7 +162,7 @@ log_info "  - 前端界面: http://localhost:80"
 log_info "  - API 文档: http://localhost:80/docs"
 log_info ""
 log_info "查看日志:"
-log_info "  cd $SCRIPT_DIR && docker-compose logs -f app"
+log_info "  cd $SCRIPT_DIR && docker compose logs -f app"
 log_info "========================================="
 
 exit 0

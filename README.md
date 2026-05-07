@@ -34,7 +34,7 @@ cp .env.template .env
 # - APP_PORT, REDIS_PORT, REDIS_INSIGHT_PORT: 服务端口（可选，有默认值）
 
 # 4. 启动服务
-docker-compose -f deploy/docker-compose.yml up -d
+docker compose -f deploy/docker-compose.yml up -d
 ```
 
 服务启动后访问：
@@ -45,7 +45,7 @@ docker-compose -f deploy/docker-compose.yml up -d
 > **使用外置 Redis**：如果需要连接外部 Redis 服务器，请：
 > 1. 在 `.env` 中设置 `REDIS_URL=redis://[:password@]host:port`
 > 2. 在 `deploy/docker-compose.yml` 中注释掉 `redis` 服务块和 `depends_on` 配置
-> 3. 重新启动：`docker-compose -f deploy/docker-compose.yml up -d`
+> 3. 重新启动：`docker compose -f deploy/docker-compose.yml up -d`
 
 ### 手动部署（开发环境）
 
