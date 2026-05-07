@@ -8,6 +8,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import List
+from urllib.parse import unquote
 
 logger = logging.getLogger(__name__)
 
@@ -91,25 +92,29 @@ class URLFilter:
         返回:
             True表示应该爬取，False表示应该跳过
         """
+        # 对URL进行解码，支持中文匹配
+        # 例如: /%E9%9D%A2%E8%AF%95 -> /面试
+        decoded_url = unquote(url)
+
         # 首先检查exclude规则
         if self.compiled_exclude:
             for pattern in self.compiled_exclude:
-                if pattern.search(url):
-                    logger.debug(f"URL被exclude规则排除: {url}, 匹配模式: {pattern.pattern}")
+                if pattern.search(decoded_url):
+                    logger.debug(f"URL被exclude规则排除: {url} (解码: {decoded_url}), 匹配模式: {pattern.pattern}")
                     return False
 
         # 然后检查include规则
         if self.compiled_include:
             for pattern in self.compiled_include:
-                if pattern.search(url):
-                    logger.debug(f"URL匹配include规则: {url}, 匹配模式: {pattern.pattern}")
+                if pattern.search(decoded_url):
+                    logger.debug(f"URL匹配include规则: {url} (解码: {decoded_url}), 匹配模式: {pattern.pattern}")
                     return True
             # 如果有include规则但没有匹配，返回False
-            logger.debug(f"URL未匹配任何include规则: {url}")
+            logger.debug(f"URL未匹配任何include规则: {url} (解码: {decoded_url})")
             return False
 
         # 如果没有include规则，默认允许
-        logger.debug(f"URL通过过滤（无include限制）: {url}")
+        logger.debug(f"URL通过过滤（无include限制）: {url} (解码: {decoded_url})")
         return True
 
     def filter_urls(self, urls: List[str]) -> List[str]:
