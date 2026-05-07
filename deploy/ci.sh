@@ -106,12 +106,24 @@ fi
 log_info "✅ 部署目录: $SCRIPT_DIR"
 log_info "✅ 使用配置文件: $COMPOSE_FILE"
 
-# 步骤 3: 拉取最新镜像（可选，如果需要从远程仓库拉取）
+# 步骤 3: 登录 GHCR 并拉取最新镜像
 log_info "步骤 3: 拉取最新 Docker 镜像..."
-if docker compose -f "$COMPOSE_FILE" pull app 2>/dev/null; then
+
+# 检查是否配置了 GHCR_TOKEN（可选，公开仓库不需要）
+if [ -n "$GHCR_TOKEN" ]; then
+    log_info "使用 GHCR_TOKEN 登录..."
+    echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin 2>/dev/null || true
+fi
+
+# 拉取最新镜像
+if docker compose -f "$COMPOSE_FILE" pull app; then
     log_info "✅ 镜像拉取成功"
 else
-    log_warn "镜像拉取失败或不需要拉取，将继续使用本地镜像"
+    log_error "❌ 镜像拉取失败！"
+    log_error "请检查："
+    log_error "  1. 网络连接是否正常"
+    log_error "  2. 如果是私有仓库，是否配置了 GHCR_TOKEN 和 GHCR_USERNAME"
+    exit 1
 fi
 
 # 步骤 4: 停止旧容器
@@ -139,7 +151,7 @@ RETRY_COUNT=0
 IS_HEALTHY=false
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$IS_HEALTHY" = false ]; do
-    if curl -f http://localhost:80/ > /dev/null 2>&1; then
+    if curl -f http://localhost:9023/ > /dev/null 2>&1; then
         IS_HEALTHY=true
         log_info "✅ 健康检查通过"
     else
@@ -163,8 +175,8 @@ log_info "========================================="
 log_info "🎉 部署成功完成！"
 log_info "========================================="
 log_info "访问地址:"
-log_info "  - 前端界面: http://localhost:80"
-log_info "  - API 文档: http://localhost:80/docs"
+log_info "  - 前端界面: http://localhost:9023"
+log_info "  - API 文档: http://localhost:9023/docs"
 log_info ""
 log_info "查看日志:"
 log_info "  cd $SCRIPT_DIR && docker compose -f $COMPOSE_FILE logs -f app"

@@ -3,9 +3,7 @@ version: '3.8'
 services:
   # Interview Agent 应用（使用外置 Redis）
   app:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    image: ghcr.io/yw610523/interview_agent:latest
     container_name: interview-agent
     ports:
       - "${APP_PORT:-9023}:9023"  # 前端访问端口
