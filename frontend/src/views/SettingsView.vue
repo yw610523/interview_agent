@@ -310,15 +310,18 @@ const loadSystemConfig = async () => {
       
       // 加载Redis配置
       if (config.redis) {
-        const redisUrl = config.redis.redis_url || 'redis://localhost:6379/0'
-        // 解析 Redis URL
-        const match = redisUrl.match(/redis:\/\/(?:(.*):(.*)@)?([^:]+):(\d+)\/(\d+)/)
+        const redisUrl = config.redis.redis_url || 'redis://localhost:6379'
+        // 解析 Redis URL - 支持有/无数据库号的格式
+        // 格式1: redis://host:port/db
+        // 格式2: redis://host:port
+        // 格式3: redis://:password@host:port/db
+        const match = redisUrl.match(/redis:\/\/(?:(.*):(.*)@)?([^:]+):(\d+)(?:\/(\d+))?/)
         if (match) {
           redisConfig.value = {
             redis_host: match[3],
             redis_port: parseInt(match[4]),
             redis_password: match[2] ? '********' : '',
-            redis_db: parseInt(match[5])
+            redis_db: match[5] ? parseInt(match[5]) : 0
           }
         } else {
           redisConfig.value = {
@@ -401,11 +404,13 @@ const saveRedisConfig = async () => {
   try {
     // 构建 Redis URL
     const { redis_host, redis_port, redis_password, redis_db } = redisConfig.value
-    let redisUrl = `redis://${redis_host}:${redis_port}/${redis_db}`
     
     // 如果有密码，添加到URL中
+    let redisUrl
     if (redis_password && redis_password !== '********') {
       redisUrl = `redis://:${redis_password}@${redis_host}:${redis_port}/${redis_db}`
+    } else {
+      redisUrl = `redis://${redis_host}:${redis_port}/${redis_db}`
     }
     
     const res = await systemConfigApi.updateRedisConfig(redisUrl)
