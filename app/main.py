@@ -5,6 +5,7 @@ from pathlib import Path
 from queue import Queue, Empty
 from threading import Thread
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 
 import uvicorn
 # 定时任务相关
@@ -26,6 +27,8 @@ from app.services.llm_service import LLMService
 # 导入爬虫相关模块
 from app.services.sitemap_crawler import SitemapCrawler
 from app.services.vector_service import VectorService, VectorRecord
+# 导入任务管理器
+from app.services.crawl_task_manager import crawl_task_manager, TaskStatus
 
 app = FastAPI(title="Interview AI Agent")
 
@@ -48,8 +51,8 @@ vector_service = VectorService()
 # 设置配置热加载管理器的服务引用
 config_reload_manager.set_services(llm_service, vector_service)
 
-
 # 定义面试题数据模型
+
 class InterviewQuestion(BaseModel):
     title: str
     answer: str
@@ -59,8 +62,8 @@ class InterviewQuestion(BaseModel):
     difficulty: Optional[str] = "medium"
     category: Optional[str] = ""
 
-
 # 爬取结果模型
+
 class CrawlResult(BaseModel):
     status: str
     message: str
@@ -69,13 +72,12 @@ class CrawlResult(BaseModel):
     parsed_questions: Optional[int] = 0
     inserted_questions: Optional[int] = 0
 
-
 # 搜索结果模型
+
 class SearchResult(BaseModel):
     query: str
     results: List[Dict[str, Any]]
     total: int
-
 
 @app.post("/api/questions/ingest", summary="接收并存储面试题")
 async def ingest_question(questions: List[InterviewQuestion]):
@@ -107,7 +109,6 @@ async def ingest_question(questions: List[InterviewQuestion]):
         logger.error(f"Ingest error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 def run_crawler() -> Dict[str, Any]:
     """
     执行爬虫任务，并将结果存入向量数据库
@@ -138,6 +139,7 @@ def run_crawler() -> Dict[str, Any]:
         total_parsed_questions = 0
 
         # 定义页面处理回调函数（边扫描边解析）
+
         def on_page_processed(page_data):
             nonlocal total_parsed_questions
             try:
@@ -147,6 +149,7 @@ def run_crawler() -> Dict[str, Any]:
                 page_list = [page_data]
 
                 # 定义即时入库回调函数
+
                 def on_question_found(questions):
                     nonlocal inserted_count
                     records = []
@@ -237,11 +240,10 @@ def run_crawler() -> Dict[str, Any]:
         logger.error(f"爬虫任务失败: {str(e)}")
         return {"status": "error", "message": str(e)}
 
-
 @app.get("/api/crawl/run", summary="手动触发爬虫任务")
 async def trigger_crawl():
     """
-    手动触发爬虫任务
+    手动触发爬虫任务（同步，会阻塞直到完成）
     """
     try:
         result = run_crawler()
@@ -249,6 +251,244 @@ async def trigger_crawl():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/crawl/run-async", summary="异步触发爬虫任务")
+async def trigger_crawl_async():
+    """
+    异步触发爬虫任务（不阻塞，立即返回任务ID）
+    """
+    import uuid
+
+    try:
+        # 生成任务ID
+        task_id = str(uuid.uuid4())
+
+        # 创建任务
+        task = crawl_task_manager.create_task(task_id)
+
+        # 在后台线程中执行爬虫任务
+
+        def run_async_crawl():
+            try:
+                # 更新任务状态为运行中
+                crawl_task_manager.update_task_status(
+                    task_id,
+                    TaskStatus.RUNNING,
+                    start_time=datetime.now().isoformat()
+                )
+
+                # 加载配置
+                DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
+
+                if DEFAULT_CONFIG_PATH.exists():
+                    config = CrawlerConfig.from_json(str(DEFAULT_CONFIG_PATH))
+                else:
+                    config = get_config_from_env()
+
+                if not config.sitemap_url:
+                    raise ValueError("未指定 Sitemap URL")
+
+                # 创建爬虫
+                crawler = SitemapCrawler(config=config)
+
+                # 统计变量
+                inserted_count = 0
+                total_parsed_questions = 0
+
+                # 定义页面处理回调函数
+
+                def on_page_processed(page_data):
+                    nonlocal total_parsed_questions
+                    try:
+                        # 检查是否应该停止
+                        if task.stop_flag.is_set():
+                            return
+
+                        page_list = [page_data]
+
+                        def on_question_found(questions):
+                            nonlocal inserted_count
+                            records = []
+                            for q in questions:
+                                record = VectorRecord(
+                                    id="",
+                                    title=q.title,
+                                    answer=q.answer,
+                                    source_url=q.source_url,
+                                    tags=q.tags,
+                                    importance_score=q.importance_score,
+                                    difficulty=q.difficulty,
+                                    category=q.category,
+                                )
+                                records.append(record)
+                            count = vector_service.insert_questions(records)
+                            inserted_count += count
+
+                            # 更新任务进度
+                            task.parsed_questions += len(questions)
+                            task.inserted_questions = inserted_count
+
+                        parsed_questions = llm_service.parse_crawl_results(
+                            page_list, on_question_found=on_question_found
+                        )
+                        total_parsed_questions += len(parsed_questions)
+
+                        # 更新已处理的URL数量
+                        task.processed_urls += 1
+
+                    except Exception as e:
+                        logger.error(f"页面处理失败: {str(e)}")
+
+                # 启动爬虫，传入停止标志和回调
+                results = crawler.crawl(
+                    page_processed_callback=on_page_processed,
+                    stop_flag=task.stop_flag
+                )
+
+                # 检查是否是正常完成还是被中断
+                if task.stop_flag.is_set():
+                    # 任务被中断
+                    crawl_task_manager.update_task_status(
+                        task_id,
+                        TaskStatus.STOPPED,
+                        end_time=datetime.now().isoformat(),
+                        error_message="任务被用户中断"
+                    )
+                    logger.info(f"任务 {task_id} 已被用户中断")
+
+                    # 更新全局爬取状态到Redis
+                    try:
+                        if vector_service.redis_client:
+                            stats = crawler.statistics
+                            result = {
+                                "status": "stopped",
+                                "message": "任务被用户中断",
+                                "statistics": {
+                                    "total_urls": stats.total_urls,
+                                    "successful_scans": stats.successful_scans,
+                                    "failed_scans": stats.failed_scans,
+                                    "total_load_time": stats.total_load_time,
+                                    "start_time": stats.start_time,
+                                    "end_time": stats.end_time,
+                                },
+                                "result_count": len(results),
+                                "parsed_questions": total_parsed_questions,
+                                "inserted_questions": inserted_count,
+                            }
+                            result_json = json.dumps(result)
+                            vector_service.redis_client.setex(
+                                "crawl:last_result", 86400, result_json
+                            )
+                            crawl_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            vector_service.redis_client.setex(
+                                "crawl:last_time", 86400, crawl_time
+                            )
+                            logger.info("已更新中断任务的全局状态到 Redis")
+                    except Exception as e:
+                        logger.warning(f"存储中断任务状态到 Redis 失败: {str(e)}")
+                else:
+                    # 任务正常完成
+                    stats = crawler.statistics
+                    task.total_urls = stats.total_urls
+                    task.processed_urls = stats.successful_scans + stats.failed_scans
+                    task.parsed_questions = total_parsed_questions
+                    task.inserted_questions = inserted_count
+
+                    result = {
+                        "status": "success",
+                        "message": "爬取完成",
+                        "statistics": {
+                            "total_urls": stats.total_urls,
+                            "successful_scans": stats.successful_scans,
+                            "failed_scans": stats.failed_scans,
+                            "total_load_time": stats.total_load_time,
+                            "start_time": stats.start_time,
+                            "end_time": stats.end_time,
+                        },
+                        "result_count": len(results),
+                        "parsed_questions": total_parsed_questions,
+                        "inserted_questions": inserted_count,
+                    }
+
+                    crawl_task_manager.update_task_status(
+                        task_id,
+                        TaskStatus.COMPLETED,
+                        end_time=datetime.now().isoformat(),
+                        result=result
+                    )
+                    logger.info(f"任务 {task_id} 已完成")
+
+                    # 更新全局爬取状态到Redis
+                    try:
+                        if vector_service.redis_client:
+                            result_json = json.dumps(result)
+                            vector_service.redis_client.setex(
+                                "crawl:last_result", 86400, result_json
+                            )
+                            crawl_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            vector_service.redis_client.setex(
+                                "crawl:last_time", 86400, crawl_time
+                            )
+                            logger.info("已更新全局爬取状态到 Redis")
+                    except Exception as e:
+                        logger.warning(f"存储爬虫结果到 Redis 失败: {str(e)}")
+
+            except Exception as e:
+                logger.error(f"任务 {task_id} 执行失败: {str(e)}")
+                crawl_task_manager.update_task_status(
+                    task_id,
+                    TaskStatus.FAILED,
+                    end_time=datetime.now().isoformat(),
+                    error_message=str(e)
+                )
+
+        # 启动后台线程
+        thread = Thread(target=run_async_crawl, daemon=True)
+        thread.start()
+
+        return {
+            "status": "accepted",
+            "message": "爬虫任务已启动",
+            "task_id": task_id
+        }
+
+    except Exception as e:
+        logger.error(f"启动异步爬虫任务失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/crawl/task/{task_id}", summary="获取爬虫任务状态")
+async def get_crawl_task_status(task_id: str):
+    """
+    获取指定爬虫任务的状态
+    """
+    task = crawl_task_manager.get_task(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    return task.to_dict()
+
+@app.post("/api/crawl/stop/{task_id}", summary="停止爬虫任务")
+async def stop_crawl_task(task_id: str):
+    """
+    停止正在运行的爬虫任务
+    """
+    success = crawl_task_manager.stop_task(task_id)
+
+    if not success:
+        raise HTTPException(status_code=400, detail="无法停止任务（可能已完成或不存在）")
+
+    return {
+        "status": "success",
+        "message": "已请求停止任务",
+        "task_id": task_id
+    }
+
+@app.get("/api/crawl/tasks", summary="获取所有爬虫任务")
+async def get_all_crawl_tasks():
+    """
+    获取所有爬虫任务的状态
+    """
+    return crawl_task_manager.get_all_tasks()
 
 @app.get("/api/crawl/status", summary="获取爬虫状态")
 async def get_crawl_status():
@@ -334,7 +574,6 @@ async def get_crawl_status():
 
     return status_info
 
-
 @app.get("/api/questions/search", summary="搜索面试题")
 async def search_questions(
         query: str,
@@ -372,7 +611,6 @@ async def search_questions(
         logger.error(f"Search error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/questions/count", summary="获取面试题总数")
 async def get_question_count():
     """
@@ -384,7 +622,6 @@ async def get_question_count():
     except Exception as e:
         logger.error(f"Count error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/questions/generate-batch", summary="批量生成面试题")
 async def generate_batch_questions(
@@ -454,7 +691,6 @@ async def generate_batch_questions(
         logger.error(f"批量生成面试题失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/questions/generate", summary="使用大模型生成答案")
 async def generate_answer(question: str):
     """
@@ -466,7 +702,6 @@ async def generate_answer(question: str):
     except Exception as e:
         logger.error(f"Generate answer error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/questions/{question_id}", summary="获取单个面试题详情")
 async def get_question(question_id: str):
@@ -487,7 +722,6 @@ async def get_question(question_id: str):
         logger.error(f"Get question error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.delete("/api/questions/{question_id}", summary="删除面试题")
 async def delete_question(question_id: str):
     """
@@ -506,7 +740,6 @@ async def delete_question(question_id: str):
     except Exception as e:
         logger.error(f"Delete question error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/questions", summary="获取所有面试题")
 async def get_all_questions(
@@ -532,7 +765,6 @@ async def get_all_questions(
     except Exception as e:
         logger.error(f"Get all questions error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/debug/vector-status", summary="调试：查看向量数据库状态")
 async def debug_vector_status():
@@ -579,7 +811,6 @@ async def debug_vector_status():
         logger.error(f"Debug vector status error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/debug/reset-index", summary="调试：重置向量索引")
 async def reset_vector_index():
     """
@@ -610,7 +841,6 @@ async def reset_vector_index():
     except Exception as e:
         logger.error(f"Reset index error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/api/debug/merge-duplicates", summary="调试：合并重复问题")
 async def merge_duplicate_questions(
@@ -734,7 +964,6 @@ async def merge_duplicate_questions(
         logger.error(f"Merge duplicates error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/crawl/single-page", summary="智能爬取单个页面")
 async def crawl_single_page(url: str):
     """
@@ -831,7 +1060,6 @@ async def crawl_single_page(url: str):
         logger.error(f"单页爬取失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/crawl/single-page/stream", summary="单页爬取实时日志流")
 async def crawl_single_page_stream(url: str):
     """
@@ -860,6 +1088,7 @@ async def crawl_single_page_stream(url: str):
             yield f"data: {json.dumps({'type': 'start', 'message': '开始爬取', 'progress': 0})}\n\n"
 
             # 定义日志回调函数
+
             def log_callback(message: str, progress: int, step: str = "info"):
                 log_data = {
                     "type": "log",
@@ -871,6 +1100,7 @@ async def crawl_single_page_stream(url: str):
                 log_queue.put(json.dumps(log_data))
 
             # 在后台线程中执行爬取任务
+
             def run_crawl():
                 try:
                     log_callback("正在扫描页面...", 10, "scanning")
@@ -923,6 +1153,7 @@ async def crawl_single_page_stream(url: str):
         # original_handlers = logger.handlers.copy()
 
                     class SSELogHandler(logging.Handler):
+
                         def emit(self, record):
                             try:
                                 # 获取格式化的日志消息
@@ -1061,7 +1292,6 @@ async def crawl_single_page_stream(url: str):
         }
     )
 
-
 @app.get("/api/config", summary="获取爬虫配置")
 async def get_crawler_config():
     """
@@ -1082,7 +1312,6 @@ async def get_crawler_config():
     except Exception as e:
         logger.error(f"获取配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.put("/api/config", summary="更新爬虫配置")
 async def update_crawler_config(config_data: Dict[str, Any]):
@@ -1109,7 +1338,6 @@ async def update_crawler_config(config_data: Dict[str, Any]):
         logger.error(f"更新配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/scheduler-config", summary="获取定时任务配置")
 async def get_scheduler_config_api():
     """
@@ -1124,7 +1352,6 @@ async def get_scheduler_config_api():
     except Exception as e:
         logger.error(f"获取定时配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.put("/api/scheduler-config", summary="更新定时任务配置")
 async def update_scheduler_config(hour: int, minute: int):
@@ -1147,7 +1374,6 @@ async def update_scheduler_config(hour: int, minute: int):
     except Exception as e:
         logger.error(f"更新定时配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.put("/api/llm-config", summary="更新模型配置")
 async def update_llm_config(config_data: Dict[str, Any]):
@@ -1192,7 +1418,6 @@ async def update_llm_config(config_data: Dict[str, Any]):
         logger.error(f"更新模型配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.put("/api/redis-config", summary="更新Redis配置")
 async def update_redis_config(redis_url: str):
     """
@@ -1221,7 +1446,6 @@ async def update_redis_config(redis_url: str):
     except Exception as e:
         logger.error(f"更新Redis配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.put("/api/email-config", summary="更新邮件配置")
 async def update_email_config(config_data: Dict[str, Any]):
@@ -1263,7 +1487,6 @@ async def update_email_config(config_data: Dict[str, Any]):
     except Exception as e:
         logger.error(f"更新邮件配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/api/test-email", summary="测试邮件发送")
 async def test_email():
@@ -1307,7 +1530,6 @@ async def test_email():
     except Exception as e:
         logger.error(f"测试邮件发送失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"邮件发送失败: {str(e)}")
-
 
 @app.get("/api/system-config", summary="获取系统配置")
 async def get_system_config():
@@ -1368,7 +1590,6 @@ async def get_system_config():
         logger.error(f"获取系统配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 # 定时任务调度器
 scheduler = BackgroundScheduler()
 
@@ -1377,15 +1598,14 @@ scheduler_config = get_scheduler_config()
 SCHEDULER_HOUR = scheduler_config["hour"]
 SCHEDULER_MINUTE = scheduler_config["minute"]
 
-
 # 添加定时任务：每天指定时间执行
+
 @scheduler.scheduled_job(CronTrigger(hour=SCHEDULER_HOUR, minute=SCHEDULER_MINUTE))
 def scheduled_crawl():
     """
     定时爬虫任务（每天指定时间执行）
     """
     run_crawler()
-
 
 if __name__ == "__main__":
     # 启动定时任务调度器

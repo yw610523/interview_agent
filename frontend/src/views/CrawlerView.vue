@@ -8,8 +8,17 @@
           <a-col :span="24">
             <a-card :bordered="false">
               <a-space size="large">
-                <a-button type="primary" size="large" @click="triggerCrawl" :loading="crawling">
-                  🚀 立即执行批量爬取
+                <a-button type="primary" size="large" @click="triggerAsyncCrawl" :loading="crawling">
+                  🚀 启动异步批量爬取
+                </a-button>
+                <a-button 
+                  danger 
+                  size="large" 
+                  @click="stopCrawlTask" 
+                  :disabled="!currentTaskId || !isTaskRunning"
+                  :loading="stoppingTask"
+                >
+                  ⏹️ 终止当前任务
                 </a-button>
                 <a-button size="large" @click="loadCrawlStatus">
                   📊 查看爬取状态
@@ -19,30 +28,70 @@
           </a-col>
 
           <!-- 爬取状态 -->
-          <a-col :span="24" v-if="crawlStatus">
+          <a-col :span="24" v-if="displayCrawlStatus">
             <a-card title="📈 爬取状态" :bordered="false">
               <a-descriptions bordered :column="2">
                 <a-descriptions-item label="状态">
-                  <a-tag :color="crawlStatus.status === 'completed' ? 'success' : 'default'">
-                    {{ crawlStatus.status }}
+                  <a-tag :color="getStatusColor(displayCrawlStatus.status)">
+                    {{ displayCrawlStatus.status }}
                   </a-tag>
                 </a-descriptions-item>
-                <a-descriptions-item label="总URL数">
-                  {{ crawlStatus.statistics?.total_urls || 0 }}
+                <a-descriptions-item label="总 URL 数">
+                  {{ displayCrawlStatus.statistics?.total_urls || displayCrawlStatus.total_urls || 0 }}
                 </a-descriptions-item>
                 <a-descriptions-item label="成功扫描">
-                  {{ crawlStatus.statistics?.successful_scans || 0 }}
+                  {{ displayCrawlStatus.statistics?.successful_scans || 0 }}
                 </a-descriptions-item>
                 <a-descriptions-item label="失败扫描">
-                  {{ crawlStatus.statistics?.failed_scans || 0 }}
+                  {{ displayCrawlStatus.statistics?.failed_scans || 0 }}
                 </a-descriptions-item>
                 <a-descriptions-item label="识别问题数">
-                  {{ crawlStatus.parsed_questions || 0 }}
+                  {{ displayCrawlStatus.parsed_questions || 0 }}
                 </a-descriptions-item>
                 <a-descriptions-item label="入库问题数">
-                  {{ crawlStatus.inserted_questions || 0 }}
+                  {{ displayCrawlStatus.inserted_questions || 0 }}
                 </a-descriptions-item>
               </a-descriptions>
+            </a-card>
+          </a-col>
+
+          <!-- 当前运行任务状态 -->
+          <a-col :span="24" v-if="currentTask">
+            <a-card title="🔄 当前任务进度" :bordered="false">
+              <a-progress 
+                :percent="currentTask.progress" 
+                :status="getProgressStatus(currentTask.status)"
+                :stroke-color="getProgressColor(currentTask.status)"
+              />
+              <a-descriptions bordered :column="3" size="small" style="margin-top: 16px;">
+                <a-descriptions-item label="任务ID">
+                  {{ currentTask.task_id }}
+                </a-descriptions-item>
+                <a-descriptions-item label="状态">
+                  <a-tag :color="getStatusColor(currentTask.status)">
+                    {{ currentTask.status }}
+                  </a-tag>
+                </a-descriptions-item>
+                <a-descriptions-item label="处理进度">
+                  {{ currentTask.processed_urls }} / {{ currentTask.total_urls }}
+                </a-descriptions-item>
+                <a-descriptions-item label="已识别问题">
+                  {{ currentTask.parsed_questions }}
+                </a-descriptions-item>
+                <a-descriptions-item label="已入库问题">
+                  {{ currentTask.inserted_questions }}
+                </a-descriptions-item>
+                <a-descriptions-item label="开始时间" v-if="currentTask.start_time">
+                  {{ formatTime(currentTask.start_time) }}
+                </a-descriptions-item>
+              </a-descriptions>
+              <a-alert 
+                v-if="currentTask.error_message" 
+                :message="currentTask.error_message" 
+                type="error" 
+                show-icon 
+                style="margin-top: 16px;"
+              />
             </a-card>
           </a-col>
         </a-row>
@@ -142,7 +191,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { crawlerApi } from '../services'
 import { message } from 'ant-design-vue'
 
@@ -151,30 +200,123 @@ const activeTab = ref('batch')
 // 状态
 const crawling = ref(false)
 const crawlStatus = ref(null)
+const currentTaskId = ref(null)
+const currentTask = ref(null)
+const stoppingTask = ref(false)
+let pollingInterval = null
 
-// 单页爬取
-const singlePageUrl = ref('')
-const singlePageLoading = ref(false)
-const singlePageResult = ref(null)
-const singlePageProcessing = ref(false)
-const processingMessage = ref('')
-const processingProgress = ref(0)
-const realtimeLogs = ref([])
-let eventSource = null
+// 计算任务是否正在运行
+const isTaskRunning = computed(() => {
+  return currentTask.value && 
+         (currentTask.value.status === 'running' || currentTask.value.status === 'pending')
+})
 
-// 触发批量爬取
-const triggerCrawl = async () => {
+// 计算显示的爬取状态（优先显示当前任务数据）
+const displayCrawlStatus = computed(() => {
+  // 如果有当前任务且任务已完成/停止/失败，显示任务数据
+  if (currentTask.value && 
+      (currentTask.value.status === 'completed' || 
+       currentTask.value.status === 'stopped' || 
+       currentTask.value.status === 'failed')) {
+    return {
+      status: currentTask.value.status === 'completed' ? 'completed' : 
+              currentTask.value.status === 'stopped' ? 'stopped' : 'failed',
+      statistics: {
+        total_urls: currentTask.value.total_urls || 0,
+        successful_scans: currentTask.value.processed_urls || 0,
+        failed_scans: 0,
+      },
+      parsed_questions: currentTask.value.parsed_questions || 0,
+      inserted_questions: currentTask.value.inserted_questions || 0,
+    }
+  }
+  // 否则显示旧的全局状态
+  return crawlStatus.value?.last_crawl || crawlStatus.value
+})
+
+// 触发异步批量爬取
+const triggerAsyncCrawl = async () => {
   crawling.value = true
   try {
-    const res = await crawlerApi.triggerCrawl()
-    message.success(`爬取完成！识别到 ${res.parsed_questions} 个问题`)
-    // 加载最新状态
-    await loadCrawlStatus()
+    const res = await crawlerApi.triggerCrawlAsync()
+    message.success(`爬虫任务已启动！任务ID: ${res.task_id}`)
+    currentTaskId.value = res.task_id
+    
+    // 开始轮询任务状态
+    startPolling(res.task_id)
   } catch (error) {
-    message.error('爬取失败')
+    message.error('启动爬虫任务失败')
     console.error(error)
   } finally {
     crawling.value = false
+  }
+}
+
+// 停止当前任务
+const stopCrawlTask = async () => {
+  if (!currentTaskId.value) {
+    message.warning('没有正在运行的任务')
+    return
+  }
+  
+  stoppingTask.value = true
+  try {
+    await crawlerApi.stopTask(currentTaskId.value)
+    message.success('已请求停止任务')
+    // 继续轮询以获取最终状态
+  } catch (error) {
+    message.error('停止任务失败')
+    console.error(error)
+  } finally {
+    stoppingTask.value = false
+  }
+}
+
+// 开始轮询任务状态
+const startPolling = (taskId) => {
+  // 清除之前的轮询
+  if (pollingInterval) {
+    clearInterval(pollingInterval)
+  }
+  
+  // 立即获取一次状态
+  fetchTaskStatus(taskId)
+  
+  // 每2秒轮询一次
+  pollingInterval = setInterval(() => {
+    fetchTaskStatus(taskId)
+  }, 2000)
+}
+
+// 获取任务状态
+const fetchTaskStatus = async (taskId) => {
+  try {
+    const task = await crawlerApi.getTaskStatus(taskId)
+    currentTask.value = task
+    
+    // 如果任务已完成、停止或失败，停止轮询
+    if (task.status === 'completed' || 
+        task.status === 'stopped' || 
+        task.status === 'failed') {
+      if (pollingInterval) {
+        clearInterval(pollingInterval)
+        pollingInterval = null
+      }
+      
+      // 显示完成消息
+      if (task.status === 'completed') {
+        message.success(`任务完成！识别到 ${task.parsed_questions} 个问题`)
+      } else if (task.status === 'stopped') {
+        message.info('任务已被终止')
+      } else if (task.status === 'failed') {
+        message.error(`任务失败: ${task.error_message}`)
+      }
+      
+      // 加载最新的爬取状态
+      await loadCrawlStatus()
+    }
+  } catch (error) {
+    console.error('获取任务状态失败:', error)
   }
 }
 
@@ -189,12 +331,61 @@ const loadCrawlStatus = async () => {
   }
 }
 
+// 获取状态颜色
+const getStatusColor = (status) => {
+  const colorMap = {
+    'pending': 'default',
+    'running': 'processing',
+    'completed': 'success',
+    'stopped': 'warning',
+    'failed': 'error'
+  }
+  return colorMap[status] || 'default'
+}
+
+// 获取进度条状态
+const getProgressStatus = (status) => {
+  if (status === 'completed') return 'success'
+  if (status === 'failed') return 'exception'
+  if (status === 'stopped') return 'exception'
+  return 'active'
+}
+
+// 获取进度条颜色
+const getProgressColor = (status) => {
+  const colorMap = {
+    'pending': '#d9d9d9',
+    'running': { from: '#108ee9', to: '#87d068' },
+    'completed': '#52c41a',
+    'stopped': '#faad14',
+    'failed': '#ff4d4f'
+  }
+  return colorMap[status] || '#d9d9d9'
+}
+
+// 格式化时间
+const formatTime = (timeStr) => {
+  if (!timeStr) return ''
+  const date = new Date(timeStr)
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
 // 格式化日志时间
 const formatLogTime = (timestamp) => {
   if (!timestamp) return ''
   const date = new Date(timestamp * 1000)
   return date.toLocaleTimeString('zh-CN', { hour12: false })
 }
+
+// 单页爬取（使用SSE实时日志）
+const singlePageUrl = ref('')
+const singlePageLoading = ref(false)
+const singlePageResult = ref(null)
+const singlePageProcessing = ref(false)
+const processingMessage = ref('')
+const processingProgress = ref(0)
+const realtimeLogs = ref([])
+let eventSource = null
 
 // 单页爬取（使用SSE实时日志）
 const crawlSinglePage = async () => {
@@ -290,6 +481,17 @@ const crawlSinglePage = async () => {
 
 onMounted(() => {
   loadCrawlStatus()
+})
+
+onUnmounted(() => {
+  // 清理轮询
+  if (pollingInterval) {
+    clearInterval(pollingInterval)
+  }
+  // 清理SSE连接
+  if (eventSource) {
+    eventSource.close()
+  }
 })
 </script>
 
