@@ -76,6 +76,8 @@ class TestURLScanner:
         mock_response.status_code = 200
         mock_response.headers = {'Content-Type': 'text/html'}
         mock_response.text = SAMPLE_HTML
+        mock_response.content = SAMPLE_HTML.encode('utf-8')
+        mock_response.apparent_encoding = 'utf-8'  # 添加 apparent_encoding
         mock_session.get.return_value = mock_response
 
         scanner = URLScanner()
@@ -111,6 +113,8 @@ class TestURLScanner:
         mock_response.status_code = 200
         mock_response.headers = {'Content-Type': 'text/html'}
         mock_response.text = SAMPLE_HTML
+        mock_response.content = SAMPLE_HTML.encode('utf-8')
+        mock_response.apparent_encoding = 'utf-8'
         mock_session.get.return_value = mock_response
 
         scanner = URLScanner()
@@ -130,6 +134,8 @@ class TestURLScanner:
         mock_response.status_code = 200
         mock_response.headers = {'Content-Type': 'text/html'}
         mock_response.text = SAMPLE_HTML
+        mock_response.content = SAMPLE_HTML.encode('utf-8')
+        mock_response.apparent_encoding = 'utf-8'
         mock_session.get.return_value = mock_response
 
         scanner = URLScanner()
@@ -149,6 +155,8 @@ class TestURLScanner:
         mock_response.status_code = 200
         mock_response.headers = {'Content-Type': 'text/html'}
         mock_response.text = SAMPLE_HTML
+        mock_response.content = SAMPLE_HTML.encode('utf-8')
+        mock_response.apparent_encoding = 'utf-8'
         mock_session.get.return_value = mock_response
 
         scanner = URLScanner()

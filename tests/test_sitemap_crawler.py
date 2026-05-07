@@ -120,6 +120,7 @@ class TestSitemapCrawler:
             'https://example.com/page1',
             'https://example.com/page2',
         ]
+        mock_parser.fetch_sitemap.return_value = "<xml></xml>"  # Mock fetch_sitemap
         mock_parser_class.return_value = mock_parser
 
         # Mock scanner
@@ -129,6 +130,7 @@ class TestSitemapCrawler:
         mock_result2 = ScanResult('https://example.com/page2')
         mock_result2.status_code = 200
         mock_scanner.scan.side_effect = [mock_result1, mock_result2]
+        mock_scanner.check_robots_txt.return_value = None  # Mock check_robots_txt
         mock_scanner_class.return_value = mock_scanner
 
         crawler = SitemapCrawler(sitemap_url='https://example.com/sitemap.xml')
@@ -149,12 +151,14 @@ class TestSitemapCrawler:
             'https://example.com/page3',
             'https://example.com/page4',
         ]
+        mock_parser.fetch_sitemap.return_value = "<xml></xml>"  # Mock fetch_sitemap
         mock_parser_class.return_value = mock_parser
 
         mock_scanner = Mock()
         mock_result = ScanResult('https://example.com/page1')
         mock_result.status_code = 200
         mock_scanner.scan.return_value = mock_result
+        mock_scanner.check_robots_txt.return_value = None  # Mock check_robots_txt
         mock_scanner_class.return_value = mock_scanner
 
         crawler = SitemapCrawler(
@@ -173,12 +177,14 @@ class TestSitemapCrawler:
         """测试带进度回调的爬取。"""
         mock_parser = Mock()
         mock_parser.parse.return_value = ['https://example.com/page1']
+        mock_parser.fetch_sitemap.return_value = "<xml></xml>"  # Mock fetch_sitemap
         mock_parser_class.return_value = mock_parser
 
         mock_scanner = Mock()
         mock_result = ScanResult('https://example.com/page1')
         mock_result.status_code = 200
         mock_scanner.scan.return_value = mock_result
+        mock_scanner.check_robots_txt.return_value = None  # Mock check_robots_txt
         mock_scanner_class.return_value = mock_scanner
 
         callback_called = False

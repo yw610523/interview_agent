@@ -1,9 +1,12 @@
 import os
+import pytest
 from app.services.email_service import send_interview_email
 
-# 注意：不使用 @patch 装饰器
 
-
+@pytest.mark.skipif(
+    not os.getenv("SMTP_TEST_USER"),
+    reason="需要设置 SMTP_TEST_USER 环境变量"
+)
 def test_send_real_email():
     """
     真实场景测试：会通过网络连接 QQ 邮箱服务器并发送邮件
