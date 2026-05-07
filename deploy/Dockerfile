@@ -12,7 +12,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # 后端构建阶段
-FROM python:3.10-slim AS backend-builder
+FROM docker.m.daocloud.io/library/python:3.10-slim AS backend-builder
 
 # 设置工作目录
 WORKDIR /app
