@@ -31,27 +31,34 @@ pipeline {
                 script {
                     echo "🚀 部署容器..."
                     
-                    sh """
-                        # 停止并删除旧容器
-                        if docker ps -a | grep -q ${CONTAINER_NAME}; then
-                            echo "🛑 停止旧容器..."
-                            docker stop ${CONTAINER_NAME} || true
-                            docker rm ${CONTAINER_NAME} || true
-                        fi
-                        
-                        # 启动新容器
-                        docker run -d \\
-                          --name ${CONTAINER_NAME} \\
-                          --restart unless-stopped \\
-                          -p 8000:8000 \\
-                          -v /data/interview_agent:/app/data \\
-                          -e DATABASE_URL=${DATABASE_URL} \\
-                          -e REDIS_URL=${REDIS_URL} \\
-                          -e OPENAI_API_KEY=${OPENAI_API_KEY} \\
-                          ${env.IMAGE_NAME}
-                        
-                        echo "✅ 容器启动成功"
-                    """
+                    // 使用 Jenkins 凭据注入环境变量
+                    withCredentials([
+                        string(credentialsId: 'database-url', variable: 'DB_URL'),
+                        string(credentialsId: 'redis-url', variable: 'REDIS_CONN'),
+                        string(credentialsId: 'openai-api-key', variable: 'OPENAI_KEY')
+                    ]) {
+                        sh """
+                            # 停止并删除旧容器
+                            if docker ps -a | grep -q ${CONTAINER_NAME}; then
+                                echo "🛑 停止旧容器..."
+                                docker stop ${CONTAINER_NAME} || true
+                                docker rm ${CONTAINER_NAME} || true
+                            fi
+                            
+                            # 启动新容器
+                            docker run -d \\
+                              --name ${CONTAINER_NAME} \\
+                              --restart unless-stopped \\
+                              -p 8000:8000 \\
+                              -v /data/interview_agent:/app/data \\
+                              -e DATABASE_URL=${DB_URL} \\
+                              -e REDIS_URL=${REDIS_CONN} \\
+                              -e OPENAI_API_KEY=${OPENAI_KEY} \\
+                              ${env.IMAGE_NAME}
+                            
+                            echo "✅ 容器启动成功"
+                        """
+                    }
                 }
             }
         }
