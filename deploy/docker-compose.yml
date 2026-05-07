@@ -28,6 +28,7 @@ services:
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_TEST_USER=${SMTP_TEST_USER}
       
       # OpenAI 配置
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -36,7 +37,7 @@ services:
       - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       - EMBEDDING_DIMENSION=${EMBEDDING_DIMENSION:-1536}
       
-      # Redis 配置
+      # Redis 配置（使用容器内 Redis）
       - REDIS_URL=redis://redis:6379
       
       # 爬虫配置
@@ -44,10 +45,17 @@ services:
       - CRAWLER_TIMEOUT=${CRAWLER_TIMEOUT:-30}
       - CRAWLER_MAX_URLS=${CRAWLER_MAX_URLS}
       - CRAWLER_DELAY=${CRAWLER_DELAY:-0.5}
+      - CRAWLER_OUTPUT_DIR=${CRAWLER_OUTPUT_DIR:-./crawl_results}
+      - CRAWLER_USER_AGENT=${CRAWLER_USER_AGENT:-Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36}
       
       # 定时任务配置
       - SCHEDULER_HOUR=${SCHEDULER_HOUR:-22}
       - SCHEDULER_MINUTE=${SCHEDULER_MINUTE:-0}
+      
+      # LLM 配置
+      - MAX_CONTENT_LENGTH_PER_PAGE=${MAX_CONTENT_LENGTH_PER_PAGE:-2000}
+      - MODEL_MAX_INPUT_TOKENS=${MODEL_MAX_INPUT_TOKENS:-128000}
+      - MODEL_MAX_OUTPUT_TOKENS=${MODEL_MAX_OUTPUT_TOKENS:-16384}
     depends_on:
       - redis
     networks:

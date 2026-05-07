@@ -64,13 +64,18 @@ pipeline {
                         string(credentialsId: 'crawler-timeout', variable: 'CRAWLER_TIMEOUT'),
                         string(credentialsId: 'crawler-max-urls', variable: 'CRAWLER_MAX_URLS'),
                         string(credentialsId: 'crawler-delay', variable: 'CRAWLER_DELAY'),
+                        string(credentialsId: 'crawler-output-dir', variable: 'CRAWLER_OUTPUT_DIR'),
+                        string(credentialsId: 'crawler-user-agent', variable: 'CRAWLER_USER_AGENT'),
                         string(credentialsId: 'scheduler-hour', variable: 'SCHEDULER_HOUR'),
                         string(credentialsId: 'scheduler-minute', variable: 'SCHEDULER_MINUTE'),
                         string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY'),
                         string(credentialsId: 'openai-api-base', variable: 'OPENAI_API_BASE'),
                         string(credentialsId: 'openai-model', variable: 'OPENAI_MODEL'),
                         string(credentialsId: 'openai-embedding-model', variable: 'OPENAI_EMBEDDING_MODEL'),
-                        string(credentialsId: 'embedding-dimension', variable: 'EMBEDDING_DIMENSION')
+                        string(credentialsId: 'embedding-dimension', variable: 'EMBEDDING_DIMENSION'),
+                        string(credentialsId: 'max-content-length', variable: 'MAX_CONTENT_LENGTH_PER_PAGE'),
+                        string(credentialsId: 'model-max-input-tokens', variable: 'MODEL_MAX_INPUT_TOKENS'),
+                        string(credentialsId: 'model-max-output-tokens', variable: 'MODEL_MAX_OUTPUT_TOKENS')
                     ]) {
                         sh """
                             cd ${DEPLOY_DIR}/deploy
@@ -88,6 +93,8 @@ SITEMAP_URL=${SITEMAP_URL}
 CRAWLER_TIMEOUT=${CRAWLER_TIMEOUT}
 CRAWLER_MAX_URLS=${CRAWLER_MAX_URLS}
 CRAWLER_DELAY=${CRAWLER_DELAY}
+CRAWLER_OUTPUT_DIR=${CRAWLER_OUTPUT_DIR}
+CRAWLER_USER_AGENT=${CRAWLER_USER_AGENT}
 
 # 定时任务配置
 SCHEDULER_HOUR=${SCHEDULER_HOUR}
@@ -99,6 +106,11 @@ OPENAI_API_BASE=${OPENAI_API_BASE}
 OPENAI_MODEL=${OPENAI_MODEL}
 OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL}
 EMBEDDING_DIMENSION=${EMBEDDING_DIMENSION}
+
+# LLM 配置
+MAX_CONTENT_LENGTH_PER_PAGE=${MAX_CONTENT_LENGTH_PER_PAGE}
+MODEL_MAX_INPUT_TOKENS=${MODEL_MAX_INPUT_TOKENS}
+MODEL_MAX_OUTPUT_TOKENS=${MODEL_MAX_OUTPUT_TOKENS}
 EOF
                             
                             echo "✅ .env 文件创建成功"
