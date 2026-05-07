@@ -1194,12 +1194,17 @@ async def update_llm_config(config_data: Dict[str, Any]):
 
 
 @app.put("/api/redis-config", summary="更新Redis配置")
-async def update_redis_config(redis_url: str):
+async def update_redis_config(config_data: Dict[str, Any]):
     """
     更新Redis配置（支持热加载，无需重启）
     """
     try:
         from dotenv import set_key, find_dotenv
+
+        # 获取redis_url
+        redis_url = config_data.get('redis_url')
+        if not redis_url:
+            raise HTTPException(status_code=400, detail="缺少redis_url参数")
 
         # 加载环境变量
         dotenv_path = find_dotenv()
@@ -1218,6 +1223,8 @@ async def update_redis_config(redis_url: str):
             "hot_reload": reload_success,
             "config": {"redis_url": redis_url}
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"更新Redis配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
