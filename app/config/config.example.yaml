@@ -1,0 +1,69 @@
+# ============================================
+# Interview Agent 系统配置模板
+# ============================================
+# 使用说明：
+# 1. 复制此文件为 config.yaml
+# 2. 修改下面的配置项为你的实际值
+# 3. 敏感信息（如API Key）建议使用环境变量覆盖
+# ============================================
+
+# 应用配置
+app:
+  port: 9023                    # 前端访问端口
+  host: "0.0.0.0"              # 监听地址
+  debug: false                  # 调试模式
+
+# LLM配置（大模型）
+llm:
+  api_key: "sk-your-api-key-here"          # OpenAI API Key（必填）
+  api_base: "https://api.openai.com/v1"    # API地址
+  model: "gpt-4o-mini"                     # 对话模型
+  embedding_model: "text-embedding-3-small" # 向量模型
+  embedding_dimension: 1536                # 向量维度
+  max_input_tokens: ""                     # 最大输入token数（留空使用默认）
+  max_output_tokens: ""                    # 最大输出token数（留空使用默认）
+
+# Redis配置（向量数据库）
+redis:
+  url: "redis://localhost:6379/0"          # Redis连接URL
+  # 或者分开配置（二选一）：
+  # host: "localhost"
+  # port: 6379
+  # db: 0
+  # password: ""
+
+# 邮件配置（SMTP）
+email:
+  smtp_server: "smtp.qq.com"               # SMTP服务器
+  smtp_port: 587                           # SMTP端口
+  smtp_user: "your_email@qq.com"           # 发件人邮箱
+  smtp_password: "your-smtp-password"      # SMTP授权码
+  test_user: "test@example.com"            # 测试收件人邮箱
+
+# 爬虫配置
+crawler:
+  sitemap_url: "javaguide.cn"              # 目标网站域名或Sitemap URL
+  sitemap_path: "/sitemap.xml"             # Sitemap路径
+  timeout: 30                              # 请求超时时间（秒）
+  max_urls: null                           # 最大爬取URL数（null表示无限制）
+  delay_between_requests: 0.5              # 请求间隔（秒）
+  output_dir: "./crawl_results"            # 结果保存目录
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  verify_ssl: true                         # 验证SSL证书
+  follow_redirects: true                   # 跟随重定向
+  max_content_length: 10485760             # 最大内容长度（字节，10MB）
+  check_robots_txt: true                   # 检查robots.txt
+  robots_path: "/robots.txt"               # robots.txt路径
+  save_results: true                       # 保存爬取结果
+  verbose: true                            # 详细日志
+  
+  # URL过滤规则（正则表达式）
+  url_include_patterns:                    # 包含规则（留空表示全部允许）
+    - "/system-design/security/jwt-intro.html"
+  
+  url_exclude_patterns: []                 # 排除规则
+
+# 定时任务配置
+scheduler:
+  hour: 22                                 # 执行小时（0-23）
+  minute: 0                                # 执行分钟（0-59）

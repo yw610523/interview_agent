@@ -1,0 +1,59 @@
+# ============================================
+# Interview Agent 系统配置
+# ============================================
+
+# 应用配置
+app:
+  port: 9023
+  host: "0.0.0.0"
+  debug: false
+
+# LLM配置（大模型）
+llm:
+  api_key: "sk-ERuRNVNN9ntK5VBX0eD2792c59E046A2B80eA7Fb75Cb82D1"
+  api_base: "https://one-api.yys2024.cn/v1"
+  model: "deepseek"
+  embedding_model: "embed-sf"
+  embedding_dimension: 1024
+  max_input_tokens: "128000"
+  max_output_tokens: "16384"
+
+# Redis配置（向量数据库）
+redis:
+  url: "redis://:Yanwei_2019.@hp.yys2024.cn:6379/0"
+
+# 邮件配置（SMTP）
+email:
+  smtp_server: "smtp.qq.com"
+  smtp_port: 465
+  smtp_user: "ryan890219@qq.com"
+  smtp_password: "yhgmvbegazuajdbg"
+  test_user: "250739104@qq.com"
+
+# 爬虫配置
+crawler:
+  sitemap_url: "javaguide.cn"
+  sitemap_path: "/sitemap.xml"
+  timeout: 30
+  max_urls: null
+  delay_between_requests: 0.5
+  output_dir: "./crawl_results"
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  verify_ssl: true
+  follow_redirects: true
+  max_content_length: 10485760
+  check_robots_txt: true
+  robots_path: "/robots.txt"
+  save_results: true
+  verbose: true
+  
+  # URL过滤规则（正则表达式）
+  url_include_patterns:
+    - "/system-design/security/jwt-intro.html"
+  
+  url_exclude_patterns: []
+
+# 定时任务配置
+scheduler:
+  hour: 22
+  minute: 0
