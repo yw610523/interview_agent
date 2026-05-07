@@ -30,6 +30,10 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="${PROJECT_DIR}/.env"
 ENV_TEMPLATE="${PROJECT_DIR}/.env.template"
 
+# 确定使用的 docker-compose 文件（可通过 COMPOSE_FILE 环境变量指定）
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+COMPOSE_FILE_PATH="${SCRIPT_DIR}/${COMPOSE_FILE}"
+
 log_info "========================================="
 log_info "开始部署 Interview Agent"
 log_info "========================================="
@@ -94,16 +98,17 @@ fi
 log_info "步骤 2: 进入部署目录..."
 cd "$SCRIPT_DIR"
 
-if [ ! -f "docker-compose.yml" ]; then
-    log_error "docker-compose.yml 文件不存在！"
+if [ ! -f "$COMPOSE_FILE" ]; then
+    log_error "${COMPOSE_FILE} 文件不存在！"
     exit 1
 fi
 
 log_info "✅ 部署目录: $SCRIPT_DIR"
+log_info "✅ 使用配置文件: $COMPOSE_FILE"
 
 # 步骤 3: 拉取最新镜像（可选，如果需要从远程仓库拉取）
 log_info "步骤 3: 拉取最新 Docker 镜像..."
-if docker compose pull app 2>/dev/null; then
+if docker compose -f "$COMPOSE_FILE" pull app 2>/dev/null; then
     log_info "✅ 镜像拉取成功"
 else
     log_warn "镜像拉取失败或不需要拉取，将继续使用本地镜像"
@@ -111,12 +116,12 @@ fi
 
 # 步骤 4: 停止旧容器
 log_info "步骤 4: 停止旧容器..."
-docker compose down --remove-orphans || true
+docker compose -f "$COMPOSE_FILE" down --remove-orphans || true
 log_info "✅ 旧容器已停止"
 
 # 步骤 5: 启动新容器
 log_info "步骤 5: 启动新容器..."
-docker compose up -d
+docker compose -f "$COMPOSE_FILE" up -d
 
 if [ $? -eq 0 ]; then
     log_info "✅ 容器启动成功"
@@ -162,7 +167,7 @@ log_info "  - 前端界面: http://localhost:80"
 log_info "  - API 文档: http://localhost:80/docs"
 log_info ""
 log_info "查看日志:"
-log_info "  cd $SCRIPT_DIR && docker compose logs -f app"
+log_info "  cd $SCRIPT_DIR && docker compose -f $COMPOSE_FILE logs -f app"
 log_info "========================================="
 
 exit 0

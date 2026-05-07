@@ -3,6 +3,14 @@
 pipeline {
     agent any
     
+    parameters {
+        booleanParam(
+            name: 'USE_EXTERNAL_REDIS',
+            defaultValue: true,
+            description: '是否使用外置 Redis（默认是）'
+        )
+    }
+    
     stages {
         stage('Checkout Code') {
             steps {
@@ -19,9 +27,13 @@ pipeline {
                 script {
                     echo "🚀 执行部署脚本..."
                     
+                    // 根据参数选择 docker-compose 文件
+                    def composeFile = params.USE_EXTERNAL_REDIS ? 'docker-compose-external-redis.yml' : 'docker-compose.yml'
+                    echo "使用配置文件: ${composeFile}"
+                    
                     sh """
                         chmod +x deploy/ci.sh
-                        ./deploy/ci.sh
+                        COMPOSE_FILE=${composeFile} ./deploy/ci.sh
                     """
                 }
             }
