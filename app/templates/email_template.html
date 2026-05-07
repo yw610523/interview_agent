@@ -3,13 +3,47 @@
 <head>
     <meta charset="utf-8">
     <style>
-        body { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; background-color: #f4f7f9; margin: 0; padding: 20px; }
-        .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
-        .header { background-color: #1a73e8; color: #ffffff; padding: 20px; text-align: center; }
-        .content { padding: 30px; }
-        .question-card { margin-bottom: 25px; border-bottom: 1px solid #edf2f7; padding-bottom: 15px; }
-        .question-title { font-size: 16px; font-weight: bold; color: #2d3748; margin-bottom: 10px; line-height: 1.5; }
-        
+        body {
+            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background-color: #f4f7f9;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+        }
+
+        .header {
+            background-color: #1a73e8;
+            color: #ffffff;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .question-card {
+            margin-bottom: 25px;
+            border-bottom: 1px solid #edf2f7;
+            padding-bottom: 15px;
+        }
+
+        .question-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #2d3748;
+            margin-bottom: 10px;
+            line-height: 1.5;
+        }
+
         /* 交互式答案样式 */
         summary {
             color: #1a73e8;
@@ -19,6 +53,7 @@
             margin-bottom: 10px;
             font-weight: 500;
         }
+
         .answer-box {
             background-color: #f8fafc;
             border-left: 4px solid #1a73e8;
@@ -28,20 +63,36 @@
             color: #4a5568;
             line-height: 1.6;
         }
-        
-        .source-tag { font-size: 12px; color: #a0aec0; margin-top: 10px; }
-        .source-tag a { color: #a0aec0; text-decoration: none; border-bottom: 1px solid #e2e8f0; }
-        .footer { background: #f8fafc; padding: 15px; text-align: center; font-size: 12px; color: #718096; }
+
+        .source-tag {
+            font-size: 12px;
+            color: #a0aec0;
+            margin-top: 10px;
+        }
+
+        .source-tag a {
+            color: #a0aec0;
+            text-decoration: none;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .footer {
+            background: #f8fafc;
+            padding: 15px;
+            text-align: center;
+            font-size: 12px;
+            color: #718096;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h2 style="margin:0;">每日面试精选</h2>
-            <p style="font-size:14px; opacity:0.8;">基于 AI 的重要程度筛选</p>
-        </div>
-        <div class="content">
-            {% for q in questions %}
+<div class="container">
+    <div class="header">
+        <h2 style="margin:0;">每日面试精选</h2>
+        <p style="font-size:14px; opacity:0.8;">基于 AI 的重要程度筛选</p>
+    </div>
+    <div class="content">
+        {% for q in questions %}
             <div class="question-card">
                 <div class="question-title">{{ loop.index }}. {{ q.title }}</div>
                 <details>
@@ -54,11 +105,11 @@
                     来源：<a href="{{ q.source_url }}">点击跳转原文</a>
                 </div>
             </div>
-            {% endfor %}
-        </div>
-        <div class="footer">
-            如果您不再需要此提醒，请在系统设置中关闭定时任务
-        </div>
+        {% endfor %}
     </div>
+    <div class="footer">
+        如果您不再需要此提醒，请在系统设置中关闭定时任务
+    </div>
+</div>
 </body>
 </html>

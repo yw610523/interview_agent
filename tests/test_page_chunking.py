@@ -94,9 +94,7 @@ def test_page_processing_independence():
 
     # 验证：每个页面至少调用一次大模型
     if call_count >= len(crawl_results):
-        logger.info(
-            f"✓ 测试通过: 大模型调用次数 ({call_count}) >= 页面数 ({
-                len(crawl_results)})")
+        logger.info(f"✓ 测试通过: 大模型调用次数 ({call_count}) >= 页面数 ({len(crawl_results)})")
         logger.info("  说明每个页面都独立处理，没有合并")
 
         # 检查是否有重复处理的页面（因为内容过长被分块）
@@ -110,9 +108,7 @@ def test_page_processing_independence():
             logger.warning("⚠ 部分页面可能未被处理或被合并")
             return False
     else:
-        logger.error(
-            f"✗ 测试失败: 大模型调用次数 ({call_count}) < 页面数 ({
-                len(crawl_results)})")
+        logger.error(f"✗ 测试失败: 大模型调用次数 ({call_count}) < 页面数 ({len(crawl_results)})")
         logger.error("  可能存在页面合并处理的情况")
         return False
 

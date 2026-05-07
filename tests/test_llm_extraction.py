@@ -119,13 +119,9 @@ def test_llm_extraction():
 
     if len(TEST_CONTENT) <= max_content_length:
         chunks = [TEST_CONTENT]
-        print(
-            f"✅ 内容未超限，不需要分chunk (实际: {
-                len(TEST_CONTENT)} <= 配置: {max_content_length})")
+        print(f"✅ 内容未超限，不需要分chunk (实际: {len(TEST_CONTENT)} <= 配置: {max_content_length})")
     else:
-        print(
-            f"⚠️  内容超限，需要分chunk (实际: {
-                len(TEST_CONTENT)} > 配置: {max_content_length})")
+        print(f"⚠️  内容超限，需要分chunk (实际: {len(TEST_CONTENT)} > 配置: {max_content_length})")
         chunks = llm_service._split_content_by_semantics(
             TEST_CONTENT, max_length=max_content_length, overlap=200)
         print(f"分chunk后数量: {len(chunks)}")
@@ -159,9 +155,7 @@ URL: {test_url}
         # 检查token限制
         estimated_tokens = int(len(prompt) / 3.5)
         if estimated_tokens > llm_service.min_token_limit:
-            print(
-                f" 警告: Token数({estimated_tokens})超过限制({
-                    llm_service.min_token_limit})")
+            print(f" 警告: Token数({estimated_tokens})超过限制({llm_service.min_token_limit})")
             continue
 
         # 打印调用参数

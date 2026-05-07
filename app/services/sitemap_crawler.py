@@ -7,17 +7,16 @@ Sitemap 爬虫模块
 
 import json
 import logging
+from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass, asdict
 from urllib.parse import urlparse
 
+from app.config.crawler_config import CrawlerConfig
 from .sitemap_parser import SitemapParser
-from .url_scanner import URLScanner, ScanResult
 from .url_filter import URLFilter
-from app.config.crawler_config import CrawlerConfig
-from app.config.crawler_config import CrawlerConfig
+from .url_scanner import URLScanner, ScanResult
 
 logger = logging.getLogger(__name__)
 
@@ -91,11 +90,11 @@ class SitemapCrawler:
             标准化后的完整站点地图 URL
         """
         url = url.strip()
-        
+
         # 如果没有协议，自动补充 https
         if not url.startswith(('http://', 'https://')):
             url = f"https://{url}"
-        
+
         # 如果只是域名（没有路径），添加配置的 sitemap 路径
         parsed = urlparse(url)
         if not parsed.path or parsed.path == '/':
@@ -103,7 +102,7 @@ class SitemapCrawler:
             if not sitemap_path.startswith('/'):
                 sitemap_path = '/' + sitemap_path
             url = f"{parsed.scheme}://{parsed.netloc}{sitemap_path}"
-        
+
         return url
 
     def _is_allowed_by_robots(self, robots_txt: str, user_agent: str = '*') -> bool:
@@ -126,7 +125,7 @@ class SitemapCrawler:
 
         for line in robots_txt.splitlines():
             line = line.strip()
-            
+
             # 跳过注释和空行
             if not line or line.startswith('#'):
                 continue
@@ -141,7 +140,7 @@ class SitemapCrawler:
                     disallowed_paths = []
                 else:
                     current_agent = None
-            
+
             # 只处理当前匹配的 user_agent 的规则
             if current_agent is None:
                 continue
@@ -153,7 +152,7 @@ class SitemapCrawler:
                     allow_all = False
                 else:
                     disallowed_paths.append(path)
-            
+
             # 处理 Allow 行（重置特定路径的禁止状态）
             if line.lower().startswith('allow:'):
                 path = line.split(':', 1)[1].strip()
@@ -163,10 +162,10 @@ class SitemapCrawler:
         return allow_all
 
     def crawl(
-        self,
-        sitemap_url: Optional[str] = None,
-        progress_callback: Optional[Callable[[ScanResult, int, int], None]] = None,
-        page_processed_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+            self,
+            sitemap_url: Optional[str] = None,
+            progress_callback: Optional[Callable[[ScanResult, int, int], None]] = None,
+            page_processed_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> List[ScanResult]:
         """
         开始爬取操作。
@@ -251,7 +250,7 @@ class SitemapCrawler:
         logger.info("Starting URL scans...")
         for i, url in enumerate(urls):
             if self.config.verbose:
-                logger.info(f"Scanning URL {i+1}/{len(urls)}: {url}")
+                logger.info(f"Scanning URL {i + 1}/{len(urls)}: {url}")
 
             result = self._url_scanner.scan(url)
             self._results.append(result)
@@ -288,7 +287,7 @@ class SitemapCrawler:
             self.save_results()
 
         logger.info(f"Crawl completed: {self.stats.successful_scans} successful, "
-                   f"{self.stats.failed_scans} failed")
+                    f"{self.stats.failed_scans} failed")
 
         return self._results
 
@@ -315,7 +314,7 @@ class SitemapCrawler:
         )
 
         for i, url in enumerate(urls):
-            logger.info(f"Scanning URL {i+1}/{len(urls)}: {url}")
+            logger.info(f"Scanning URL {i + 1}/{len(urls)}: {url}")
             result = self._url_scanner.scan(url)
             self._results.append(result)
 
@@ -390,7 +389,7 @@ class SitemapCrawler:
         # Calculate average load time
         if self.stats.successful_scans > 0:
             summary['avg_load_time'] = (
-                self.stats.total_load_time / self.stats.successful_scans
+                    self.stats.total_load_time / self.stats.successful_scans
             )
 
         return summary

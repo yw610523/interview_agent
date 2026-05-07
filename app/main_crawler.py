@@ -13,10 +13,9 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import cast
 
-from app.services.sitemap_crawler import SitemapCrawler
 from app.config.crawler_config import CrawlerConfig, get_config_from_env
+from app.services.sitemap_crawler import SitemapCrawler
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -24,7 +23,7 @@ def setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
 
@@ -32,7 +31,7 @@ def setup_logging(verbose: bool = False) -> None:
 def parse_args() -> argparse.Namespace:
     """解析命令行参数。"""
     parser = argparse.ArgumentParser(
-        description='Sitemap 爬虫 - 从站点地图爬取和分析网站',
+        description="Sitemap 爬虫 - 从站点地图爬取和分析网站",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -45,80 +44,88 @@ def parse_args() -> argparse.Namespace:
     )
 
     # 输入选项
-    input_group = parser.add_argument_group('输入选项')
+    input_group = parser.add_argument_group("输入选项")
     input_group.add_argument(
-        '--sitemap-url', '-u',
+        "--sitemap-url",
+        "-u",
         type=str,
-        help='要爬取的站点地图 URL 或域名',
+        help="要爬取的站点地图 URL 或域名",
     )
     input_group.add_argument(
-        '--sitemap-path',
+        "--sitemap-path",
         type=str,
-        help='站点地图路径（当 sitemap-url 为域名时使用，默认: /sitemap.xml）',
+        help="站点地图路径（当 sitemap-url 为域名时使用，默认: /sitemap.xml）",
     )
     input_group.add_argument(
-        '--robots-path',
+        "--robots-path",
         type=str,
-        help='robots.txt 路径（默认: /robots.txt）',
+        help="robots.txt 路径（默认: /robots.txt）",
     )
     input_group.add_argument(
-        '--config', '-c',
+        "--config",
+        "-c",
         type=str,
-        help='JSON 配置文件路径',
+        help="JSON 配置文件路径",
     )
 
     # 爬取设置
-    crawl_group = parser.add_argument_group('爬取设置')
+    crawl_group = parser.add_argument_group("爬取设置")
     crawl_group.add_argument(
-        '--timeout', '-t',
+        "--timeout",
+        "-t",
         type=int,
         default=30,
-        help='请求超时时间（秒）（默认: 30）',
+        help="请求超时时间（秒）（默认: 30）",
     )
     crawl_group.add_argument(
-        '--max-urls', '-m',
+        "--max-urls",
+        "-m",
         type=int,
-        help='最大爬取 URL 数量',
+        help="最大爬取 URL 数量",
     )
     crawl_group.add_argument(
-        '--delay', '-d',
+        "--delay",
+        "-d",
         type=float,
         default=0.5,
-        help='请求间隔时间（秒）（默认: 0.5）',
+        help="请求间隔时间（秒）（默认: 0.5）",
     )
     crawl_group.add_argument(
-        '--no-ssl-verify',
-        action='store_true',
-        help='禁用 SSL 证书验证',
+        "--no-ssl-verify",
+        action="store_true",
+        help="禁用 SSL 证书验证",
     )
     crawl_group.add_argument(
-        '--no-follow-redirects',
-        action='store_true',
-        help='不跟随重定向',
+        "--no-follow-redirects",
+        action="store_true",
+        help="不跟随重定向",
     )
 
     # 输出选项
-    output_group = parser.add_argument_group('输出选项')
+    output_group = parser.add_argument_group("输出选项")
     output_group.add_argument(
-        '--output-dir', '-o',
+        "--output-dir",
+        "-o",
         type=str,
-        default='./crawl_results',
-        help='爬取结果保存目录（默认: ./crawl_results）',
+        default="./crawl_results",
+        help="爬取结果保存目录（默认: ./crawl_results）",
     )
     output_group.add_argument(
-        '--no-save',
-        action='store_true',
-        help='不保存结果到文件',
+        "--no-save",
+        action="store_true",
+        help="不保存结果到文件",
     )
     output_group.add_argument(
-        '--quiet', '-q',
-        action='store_true',
-        help='禁用详细输出',
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="禁用详细输出",
     )
     output_group.add_argument(
-        '--verbose', '-v',
-        action='store_true',
-        help='启用调试日志',
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="启用调试日志",
     )
 
     return parser.parse_args()
@@ -133,8 +140,8 @@ def main() -> int:
     logger = logging.getLogger(__name__)
 
     # Load configuration
-    DEFAULT_CONFIG_PATH = Path(__file__).parent / 'config' / 'crawler_config.json'
-    
+    DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
+
     if args.config:
         config_path = Path(args.config)
         if not config_path.exists():
@@ -154,7 +161,7 @@ def main() -> int:
         config.sitemap_path = args.sitemap_path
     if args.robots_path:
         config.robots_path = args.robots_path
-    
+
     if not config.sitemap_url:
         logger.error("需要指定 Sitemap URL。请使用 --sitemap-url 参数或配置文件")
         return 1
@@ -171,13 +178,15 @@ def main() -> int:
         config.max_urls = args.max_urls
 
     logger.info(f"Starting crawl for: {config.sitemap_url}")
-    logger.info(f"Configuration: timeout={config.timeout}s, delay={config.delay_between_requests}s")
+    logger.info(
+        f"Configuration: timeout={config.timeout}s, delay={config.delay_between_requests}s"
+    )
 
     # Create and run crawler
     crawler = SitemapCrawler(config=config)
 
     try:
-        results = crawler.crawl()
+        crawler.crawl()
 
         # Print summary
         crawler.print_report()
@@ -204,5 +213,5 @@ def main() -> int:
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

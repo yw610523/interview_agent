@@ -7,10 +7,9 @@
 
 import struct
 import os
-import json
 import logging
-from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass, asdict
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
 from dotenv import load_dotenv
 
 # 尝试导入 Redis
@@ -90,8 +89,7 @@ class VectorService:
                 logger.info("OpenAI Embedding 客户端初始化成功")
             except Exception as e:
                 logger.error(f"OpenAI 客户端初始化失败: {str(e)}")
-            
-            
+
     def _create_embedding(self, text: str) -> List[float]:
         """
         生成文本的向量表示
@@ -162,11 +160,11 @@ class VectorService:
             error_msg = str(e)
             # 如果是因为索引不存在导致的错误，则创建索引
             if "Unknown index name" in error_msg or "does not exist" in error_msg.lower():
-                logger.info(f"索引不存在，准备创建")
+                logger.info("索引不存在，准备创建")
             else:
                 # 其他错误，也尝试创建（可能索引损坏）
                 logger.warning(f"检查索引时出错: {error_msg}，尝试重新创建")
-            
+
             # 创建索引
             try:
                 embedding_dim = int(os.getenv("EMBEDDING_DIMENSION", "1536"))
@@ -195,9 +193,11 @@ class VectorService:
                     logger.error(f"创建索引失败: {str(create_error)}")
                     return False
 
-
-
-    def insert_question(self, question: VectorRecord, check_similarity: bool = True, similarity_threshold: float = 0.85) -> bool:
+    def insert_question(
+            self,
+            question: VectorRecord,
+            check_similarity: bool = True,
+            similarity_threshold: float = 0.85) -> bool:
         """
         插入单个问题到向量数据库
 
@@ -227,13 +227,17 @@ class VectorService:
 
             if not question.id:
                 question.id = str(uuid.uuid4())
-            
+
             # 检查是否存在相似问题（使用标题+答案的组合提高准确性）
             if check_similarity:
                 search_text = question.title + " " + question.answer[:200]  # 使用前200字符的答案
                 similar_question = self._find_most_similar_question(search_text, similarity_threshold)
                 if similar_question:
-                    logger.info(f"发现相似问题: {question.title} -> {similar_question['title']} (相似度: {similar_question['score']:.2f})")
+                    logger.info(
+                        f"发现相似问题: {question.title} -> "
+                        f"{similar_question['title']} "
+                        f"(相似度: {similar_question['score']:.2f})"
+                    )
                     # 合并问题而不是插入新的
                     return self._merge_into_existing_question(similar_question['id'], question)
 
@@ -261,7 +265,11 @@ class VectorService:
             logger.error(f"插入问题失败: {str(e)}")
             return False
 
-    def insert_questions(self, questions: List[VectorRecord], check_similarity: bool = True, similarity_threshold: float = 0.85) -> int:
+    def insert_questions(
+            self,
+            questions: List[VectorRecord],
+            check_similarity: bool = True,
+            similarity_threshold: float = 0.85) -> int:
         """
         批量插入问题
 
@@ -485,34 +493,34 @@ class VectorService:
     def _find_most_similar_question(self, text: str, threshold: float = 0.85) -> Optional[Dict[str, Any]]:
         """
         查找最相似的问题
-        
+
         参数:
             text: 用于搜索的文本（建议使用标题+答案的组合）
             threshold: 相似度阈值
-        
+
         返回:
             相似问题信息（包含 id, title, score），如果没有找到则返回 None
         """
         try:
             # 生成查询向量
             query_embedding = self._create_embedding(text)
-            
+
             # 使用 KNN 搜索最相似的问题（返回前5个候选）
-            base_query = f"*=>[KNN 5 @embedding $vector AS score]"
+            base_query = "*=>[KNN 5 @embedding $vector AS score]"
             query_obj = (
                 Query(base_query)
                 .return_fields("id", "title", "answer", "score")
                 .sort_by("score")
                 .dialect(2)
             )
-            
+
             # 执行查询
             query_embedding_bytes = struct.pack(f'{len(query_embedding)}f', *query_embedding)
             params = {"vector": query_embedding_bytes}
             results = self.redis_client.ft(self.index_name).search(
                 query_obj, query_params=params
             )
-            
+
             # 检查结果是否超过阈值
             if results.docs and len(results.docs) > 0:
                 # 遍历所有候选，找到最相似的
@@ -520,7 +528,7 @@ class VectorService:
                     # RediSearch 返回的 score 是距离值（越小越相似），需要转换
                     # COSINE 距离 = 1 - cosine_similarity
                     similarity = 1.0 - float(doc.score)
-                    
+
                     if similarity >= threshold:
                         logger.debug(f"找到相似问题: {doc.title} (相似度: {similarity:.2f})")
                         return {
@@ -529,27 +537,27 @@ class VectorService:
                             "answer": doc.answer,
                             "score": similarity
                         }
-            
+
             return None
-            
+
         except Exception as e:
             logger.error(f"查找相似问题失败: {str(e)}")
             return None
-    
+
     def _merge_into_existing_question(self, existing_id: str, new_question: VectorRecord) -> bool:
         """
         将新问题合并到已存在的问题中
-        
+
         合并策略:
         1. 保留较长的答案（通常更详细）
         2. 合并来源 URL（去重）
         3. 合并标签（去重）
         4. 保留较高的重要性评分
-        
+
         参数:
             existing_id: 已存在的问题 ID
             new_question: 新问题
-        
+
         返回:
             是否成功
         """
@@ -559,23 +567,25 @@ class VectorService:
             if not existing_question:
                 logger.error(f"未找到已存在的问题: {existing_id}")
                 return False
-            
+
             # 1. 选择较长的答案
-            new_answer = new_question.answer if len(new_question.answer) > len(existing_question['answer']) else existing_question['answer']
-            
+            new_answer = new_question.answer if len(new_question.answer) > len(
+                existing_question['answer']) else existing_question['answer']
+
             # 2. 合并来源 URL（去重）
-            existing_urls = existing_question['source_url'].split(';') if ';' in existing_question['source_url'] else [existing_question['source_url']]
+            existing_urls = existing_question['source_url'].split(';') if ';' in existing_question['source_url'] else [
+                existing_question['source_url']]
             all_urls = list(set(existing_urls + [new_question.source_url]))
             merged_source_url = ';'.join(all_urls)
-            
+
             # 3. 合并标签（去重）
             existing_tags = set(existing_question['tags'])
             new_tags = set(new_question.tags)
             merged_tags = list(existing_tags | new_tags)
-            
+
             # 4. 保留较高的重要性评分
             merged_importance = max(existing_question['importance_score'], new_question.importance_score)
-            
+
             # 更新到 Redis
             key = f"question:{existing_id}"
             data = {
@@ -587,12 +597,12 @@ class VectorService:
                 "difficulty": existing_question['difficulty'],  # 保留原难度
                 "category": existing_question['category'],  # 保留原分类
             }
-            
+
             self.redis_client.hset(key, mapping=data)
-            
+
             logger.info(f"合并问题成功: {existing_question['title']} (合并了 {new_question.source_url})")
             return True
-            
+
         except Exception as e:
             logger.error(f"合并问题失败: {str(e)}")
             return False

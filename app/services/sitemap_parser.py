@@ -5,10 +5,11 @@ Sitemap 解析器模块
 支持标准站点地图 XML 格式和站点地图索引文件。
 """
 
-import requests
-from lxml import etree
 from typing import List, Optional
 from urllib.parse import urlparse
+
+import requests
+from lxml import etree
 
 
 class SitemapParser:

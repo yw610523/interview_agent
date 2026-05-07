@@ -4,10 +4,9 @@
 此模块为站点地图爬虫提供配置管理功能。
 """
 
+import json
 from dataclasses import dataclass, asdict, field
 from typing import Optional, Dict, Any
-import json
-from pathlib import Path
 
 
 @dataclass
@@ -38,7 +37,11 @@ class CrawlerConfig:
     max_urls: Optional[int] = None
     delay_between_requests: float = 0.5
     output_dir: str = "./crawl_results"
-    user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    user_agent: str = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
     verify_ssl: bool = True
     follow_redirects: bool = True
     max_content_length: int = 10 * 1024 * 1024  # 10MB
@@ -94,6 +97,7 @@ def get_config_from_env() -> CrawlerConfig:
     import os
     import json
     from dotenv import load_dotenv
+    import logging
 
     load_dotenv()
 
@@ -122,33 +126,15 @@ def get_config_from_env() -> CrawlerConfig:
         try:
             config.url_include_patterns = json.loads(include_patterns)
         except json.JSONDecodeError as e:
-            logger.warning(f"解析CRAWLER_URL_INCLUDE_PATTERNS失败: {str(e)}")
+            logging.warning(f"解析CRAWLER_URL_INCLUDE_PATTERNS失败: {str(e)}")
 
     if exclude_patterns := os.getenv('CRAWLER_URL_EXCLUDE_PATTERNS'):
         try:
             config.url_exclude_patterns = json.loads(exclude_patterns)
         except json.JSONDecodeError as e:
-            logger.warning(f"解析CRAWLER_URL_EXCLUDE_PATTERNS失败: {str(e)}")
+            logging.warning(f"解析CRAWLER_URL_EXCLUDE_PATTERNS失败: {str(e)}")
 
     return config
-
-
-def get_scheduler_config() -> dict:
-    """
-    从环境变量加载定时任务配置。
-
-    返回:
-        包含定时任务配置的字典，包含 hour 和 minute 字段
-    """
-    import os
-    from dotenv import load_dotenv
-
-    load_dotenv()
-
-    return {
-        'hour': int(os.getenv('SCHEDULER_HOUR', 22)),
-        'minute': int(os.getenv('SCHEDULER_MINUTE', 0))
-    }
 
 
 def get_scheduler_config() -> dict:

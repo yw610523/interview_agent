@@ -13,6 +13,8 @@
   "robots_path": "/robots.txt",
   "save_results": true,
   "verbose": true,
-  "url_include_patterns": ["/system-design/security/jwt-intro.html"],
+  "url_include_patterns": [
+    "/system-design/security/jwt-intro.html"
+  ],
   "url_exclude_patterns": []
 }

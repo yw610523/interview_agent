@@ -4,11 +4,12 @@
 用于解析爬虫结果，识别和提取面试问题。
 """
 
-import os
 import json
 import logging
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, asdict
+import os
+from dataclasses import dataclass
+from typing import List, Dict, Any
+
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ except ImportError:
 # 导入json-repair用于修复损坏的JSON
 try:
     from json_repair import repair_json
+
     JSON_REPAIR_AVAILABLE = True
 except ImportError:
     JSON_REPAIR_AVAILABLE = False
@@ -104,11 +106,11 @@ class LLMService:
         return self.max_input_tokens, self.max_output_tokens
 
     def parse_crawl_results(
-        self, crawl_results: List[Dict[str, Any]], on_question_found=None
+            self, crawl_results: List[Dict[str, Any]], on_question_found=None
     ) -> List[ParsedQuestion]:
         """
         解析爬虫结果，提取面试问题
-        
+
         参数:
             crawl_results: 爬虫结果列表
             on_question_found: 回调函数，当识别到问题时立即调用（用于即时入库）
@@ -138,30 +140,30 @@ class LLMService:
 
             logger.info(f"开始解析 {len(processed_results)} 个页面")
             all_questions = []
-            
+
             for page_idx, result in enumerate(processed_results):
                 url = result.get("url", "")
                 title = result.get("title", "")
                 content = result.get("content", "")
-                        
+
                 # 验证内容有效性
                 if not content or len(content) < 100:
-                    logger.warning(f"页面 {page_idx + 1} 内容过短({len(content) if content else 0}字符)，跳过处理")
-                    logger.warning(f"URL: {url}")
-                    logger.warning(f"标题: {title}")
-                    logger.warning(f"可能原因: 1) JavaScript动态渲染页面 2) 反爬虫限制 3) 页面为空")
+                    logger.warning("页面 %d 内容过短(%d字符)，跳过处理", page_idx + 1, len(content) if content else 0)
+                    logger.warning("URL: %s", url)
+                    logger.warning("标题: %s", title)
+                    logger.warning("可能原因: 1) JavaScript动态渲染页面 2) 反爬虫限制 3) 页面为空")
                     continue
-                        
-                logger.info(f"\n" + "=" * 60)
+
+                logger.info("=" * 60)
                 logger.info(f"=== 处理页面 {page_idx + 1}/{len(processed_results)} ===")
                 logger.info(f"URL: {url}")
                 logger.info(f"标题: {title}")
                 logger.info(f"内容长度: {len(content)} 字符")
-                
+
                 # 使用chunk处理单页内容
                 questions = self._process_page_with_chunks(url, title, content)
                 all_questions.extend(questions)
-                
+
                 # 立即入库：识别到问题就立即回调（如果提供了回调函数）
                 if questions and on_question_found:
                     try:
@@ -169,11 +171,11 @@ class LLMService:
                         logger.info(f"页面 {page_idx + 1} 的 {len(questions)} 个问题已即时入库")
                     except Exception as e:
                         logger.error(f"即时入库失败: {str(e)}")
-                
+
                 logger.info(f"页面 {page_idx + 1} 识别出 {len(questions)} 个问题")
                 logger.info(f"累计识别: {len(all_questions)} 个问题")
-                logger.info(f"=" * 60)
-            
+                logger.info("=" * 60)
+
             return all_questions
         except Exception as e:
             logger.error(f"大模型调用失败: {str(e)}")
@@ -200,7 +202,7 @@ class LLMService:
         return None
 
     def _preprocess_results(
-        self, crawl_results: List[Dict[str, Any]]
+            self, crawl_results: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
         智能预处理爬虫结果，保留完整内容让大模型自主识别
@@ -307,8 +309,6 @@ class LLMService:
         sentence_lower = sentence.lower()
         return any(keyword in sentence_lower for keyword in technical_keywords)
 
-
-
     def _get_system_prompt(self) -> str:
         """
         获取优化的系统提示词
@@ -368,48 +368,48 @@ class LLMService:
     def _split_content_by_semantics(self, content: str, max_length: int = 1500, overlap: int = 300) -> list:
         """
         使用滑动窗口和语义边界分割内容
-        
+
         参数:
             content: 要分割的内容
             max_length: 每个chunk的最大长度
             overlap: 相邻chunk之间的重叠长度
-        
+
         返回:
             分割后的内容chunk列表
         """
         chunks = []
         content_length = len(content)
-        
+
         if content_length <= max_length:
             return [content]
-        
+
         start = 0
         while start < content_length:
             end = min(start + max_length, content_length)
-            
+
             # 在语义边界处分割（优先找段落、句子结束位置）
             # 从end位置向前查找合适的分割点
             split_pos = end
-            
+
             # 优先在段落分隔处分割
             for sep in ['\n\n', '\n', '。', '！', '？', '.', '!', '?']:
                 pos = content.rfind(sep, start + max_length // 2, end)
                 if pos != -1:
                     split_pos = pos + len(sep)
                     break
-            
+
             chunk = content[start:split_pos]
             chunks.append(chunk.strip())
-            
+
             # 计算下一个起始位置（考虑重叠）
             start = split_pos - overlap
             if start < 0:
                 start = 0
-            
+
             # 避免无限循环
             if start >= content_length or (len(chunks) > 0 and start >= len(chunks[-1])):
                 break
-        
+
         return chunks
 
     def _build_prompt(self, crawl_results: List[Dict[str, Any]]) -> str:
@@ -421,8 +421,8 @@ class LLMService:
             url = result.get("url", "")
             title = result.get("title", "")
             text = result.get("content", "")
-            
-            content.append(f"### 网页 {idx+1}")
+
+            content.append(f"### 网页 {idx + 1}")
             content.append(f"URL: {url}")
             content.append(f"标题: {title}")
             content.append(f"内容:\n{text}")
@@ -433,17 +433,17 @@ class LLMService:
     def _process_page_with_chunks(self, url: str, title: str, content: str) -> List[ParsedQuestion]:
         """
         处理单个页面，支持内容chunk分割和JSON解析失败重试
-        
+
         参数:
             url: 网页URL
             title: 网页标题
             content: 网页内容
-        
+
         返回:
             从该页面提取的所有面试问题
         """
         all_questions = []
-        
+
         # 如果内容过长，进行chunk分割
         # 从环境变量读取单页最大内容长度，默认2000字符
         max_content_length = int(os.getenv("MAX_CONTENT_LENGTH_PER_PAGE", 2000))
@@ -452,14 +452,14 @@ class LLMService:
         else:
             chunks = self._split_content_by_semantics(content, max_length=max_content_length, overlap=200)
             logger.info(f"页面 {url} 内容过长，分割为 {len(chunks)} 个chunk")
-        
+
         if self.client is None:
             logger.error("大模型客户端未初始化，无法处理页面")
             return []
 
         client = self.client
         max_retries = int(os.getenv("LLM_RETRY_COUNT", 3))
-        
+
         for chunk_idx, chunk_content in enumerate(chunks):
             # 构建单chunk的提示词
             prompt = f"""### 网页信息
@@ -468,11 +468,11 @@ URL: {url}
 内容片段 {chunk_idx + 1}/{len(chunks)}:
 {chunk_content}
 """
-            
+
             questions = []
             retry_count = 0
             parse_success = False
-            
+
             while retry_count < max_retries and not parse_success:
                 try:
                     # 检查token数量
@@ -480,7 +480,7 @@ URL: {url}
                     if estimated_tokens > self.min_token_limit:
                         logger.warning(f"chunk {chunk_idx + 1} token超限，跳过")
                         break
-                    
+
                     # 记录调用参数
                     model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
                     system_prompt = self._get_system_prompt()
@@ -492,7 +492,7 @@ URL: {url}
                         f"prompt长度={len(prompt)}字符(约{estimated_tokens} tokens), "
                         f"输入上限={self.min_token_limit} tokens"
                     )
-                    
+
                     response = client.chat.completions.create(
                         model=model_name,
                         messages=[
@@ -502,12 +502,12 @@ URL: {url}
                         temperature=0.3,
                         max_tokens=self.max_output_tokens,
                     )
-                    
+
                     result = response.choices[0].message.content or ""
                     logger.info(f"LLM返回内容长度: {len(result)} 字符")
-                    
+
                     questions = self._parse_response(result)
-                                
+
                     # 检查是否成功解析到问题
                     if questions:
                         parse_success = True
@@ -516,7 +516,7 @@ URL: {url}
                         # 如果是解析错误，重试；否则认为确实没有问题
                         parse_success = True
                         logger.debug(f"chunk {chunk_idx + 1} 未识别到问题")
-                    
+
                 except json.JSONDecodeError as e:
                     retry_count += 1
                     logger.warning(f"chunk {chunk_idx + 1} JSON解析失败（第{retry_count}/{max_retries}次重试）: {str(e)}")
@@ -525,17 +525,17 @@ URL: {url}
                 except Exception as e:
                     logger.error(f"处理chunk {chunk_idx + 1} 失败: {str(e)}")
                     break
-            
+
             # 设置source_url
             for q in questions:
                 q.source_url = url
-            
+
             all_questions.extend(questions)
             if retry_count > 0:
                 logger.info(f"chunk {chunk_idx + 1} 识别出 {len(questions)} 个问题（经过 {retry_count} 次重试）")
             else:
                 logger.info(f"chunk {chunk_idx + 1} 识别出 {len(questions)} 个问题")
-        
+
         return all_questions
 
     def _parse_response(self, response: str | None) -> List[ParsedQuestion]:
@@ -545,7 +545,7 @@ URL: {url}
         if response is None:
             logger.warning("LLM返回内容为空")
             return []
-        
+
         try:
             # 清理响应文本，去除可能的代码块标记
             cleaned_response = response.strip()
@@ -554,7 +554,7 @@ URL: {url}
             if cleaned_response.endswith("```"):
                 cleaned_response = cleaned_response[:-3]
             cleaned_response = cleaned_response.strip()
-            
+
             # 提取 JSON 部分（处理可能的前后文本）
             start = cleaned_response.find("[")
             end = cleaned_response.rfind("]") + 1
@@ -562,7 +562,7 @@ URL: {url}
             if start != -1 and end != -1:
                 json_str = cleaned_response[start:end]
                 logging.debug(f"LLM返回JSON内容长度: {len(json_str)} 字符")
-                
+
                 # 尝试直接解析JSON（大多数情况下JSON是有效的）
                 try:
                     data = json.loads(json_str)
@@ -570,7 +570,7 @@ URL: {url}
                 except json.JSONDecodeError:
                     # JSON格式有问题，尝试修复
                     logger.debug("JSON格式异常，尝试修复...")
-                    
+
                     # 优先使用 json-repair 修复
                     if JSON_REPAIR_AVAILABLE:
                         try:
@@ -605,56 +605,56 @@ URL: {url}
 
                 return questions
             else:
-                logger.warning(f"未找到有效的JSON数组格式")
-                logger.warning(f"完整响应内容:\n{response}")
+                logger.warning("未找到有效的JSON数组格式")
+                logger.debug("完整响应内容:\n%s", response)
                 # 尝试从截断的JSON中恢复数据（针对JSON被截断的情况）
                 return self._try_recover_from_truncated_json(response)
         except json.JSONDecodeError as e:
-            logger.error(f"JSON解析失败: {str(e)}")
-            logger.error(f"完整响应内容:\n{response}")
+            logger.error("JSON解析失败: %s", str(e))
+            logger.debug("完整响应内容:\n%s", response)
             # 尝试从截断的JSON中恢复数据
             return self._try_recover_from_truncated_json(response)
         except Exception as e:
-            logger.error(f"解析响应失败: {str(e)}")
-            logger.error(f"完整响应内容:\n{response}")
+            logger.error("解析响应失败: %s", str(e))
+            logger.debug("完整响应内容:\n%s", response)
             import traceback
             logger.error(traceback.format_exc())
 
         return []
-    
+
     def _fix_json_format(self, json_str: str) -> str:
         """
         尝试修复常见的JSON格式问题
-            
+
         主要处理：
         1. 字符串内部未转义的引号
         2. 多行字符串中的引号
         """
         import re
-            
+
         # 方法1：使用状态机遍历整个字符串，正确处理转义字符
         result = []
         in_string = False
         escape_next = False
-            
+
         for i, char in enumerate(json_str):
             if escape_next:
                 result.append(char)
                 escape_next = False
                 continue
-                
+
             if char == '\\' and in_string:
                 result.append(char)
                 escape_next = True
                 continue
-                
+
             if char == '"':
                 if in_string:
                     # 检查这是否是字符串结束引号
                     # 向后查找下一个非空白字符
-                    remaining = json_str[i+1:]
+                    remaining = json_str[i + 1:]
                     next_non_whitespace = remaining.lstrip()
-                        
+
                     # 如果后面不是逗号、右括号、右方括号、换行符或字符串结束，
                     # 则认为这是字符串内部的引号，需要转义
                     if next_non_whitespace:
@@ -663,25 +663,25 @@ URL: {url}
                             # 这是字符串内部的引号，需要转义
                             result.append('\\')
                 in_string = not in_string
-                
+
             result.append(char)
-            
+
         fixed_str = ''.join(result)
-            
+
         # 方法2：额外修复常见的中文引号问题
         # 将中文引号替换为英文引号（如果它们在字符串内部）
         fixed_str = re.sub(r'("[^"]*?)"([^"]*?)([^"]*?")', r'\1"\2"\3', fixed_str)
-            
+
         return fixed_str
-        
+
     def _try_recover_from_truncated_json(self, response: str) -> List[ParsedQuestion]:
         """
         尝试从截断的JSON中恢复数据
-            
+
         当LLM输出被截断时（例如max_tokens限制），尝试提取已生成的有效问题
         """
         questions = []
-            
+
         try:
             logger.info("开始尝试从截断的JSON中恢复数据...")
             # 清理响应文本
@@ -691,18 +691,18 @@ URL: {url}
             if cleaned_response.endswith("```"):
                 cleaned_response = cleaned_response[:-3]
             cleaned_response = cleaned_response.strip()
-                
+
             # 查找JSON数组开始位置
             start = cleaned_response.find("[")
             if start == -1:
                 logger.warning("无法找到JSON数组起始位置")
                 logger.debug(f"完整响应内容:\n{response}")
                 return []
-                
+
             # 提取从 [ 开始的内容
             json_content = cleaned_response[start:]
             logger.info(f"提取到JSON内容长度: {len(json_content)} 字符")
-            
+
             # 优先使用 json-repair 修复
             if JSON_REPAIR_AVAILABLE:
                 try:
@@ -712,7 +712,7 @@ URL: {url}
                         logger.info(f"使用 json-repair 从截断JSON中成功恢复 {len(data)} 个问题")
                     else:
                         logger.debug("使用 json-repair 解析成功但未提取到问题")
-                        
+
                     for item in data:
                         question = ParsedQuestion(
                             title=item.get("title", ""),
@@ -725,56 +725,56 @@ URL: {url}
                         )
                         if question.title and question.answer:
                             questions.append(question)
-                        
+
                     return questions
                 except Exception as e:
                     logger.debug(f"json-repair 恢复失败: {str(e)}，尝试内置方法")
-            
+
             # 如果 json-repair 不可用或失败，使用原有逻辑
             # 尝试找到最后一个完整的对象结束位置 }
             last_complete_pos = -1
             brace_count = 0
             in_string = False
             escape_next = False
-                
+
             for i, char in enumerate(json_content):
                 if escape_next:
                     escape_next = False
                     continue
-                    
+
                 if char == '\\' and in_string:
                     escape_next = True
                     continue
-                    
+
                 if char == '"':
                     in_string = not in_string
                     continue
-                    
+
                 if in_string:
                     continue
-                    
+
                 if char == '{':
                     brace_count += 1
                 elif char == '}':
                     brace_count -= 1
                     if brace_count == 0:
                         last_complete_pos = i
-                
+
             # 如果找到了完整的对象，尝试构建有效的JSON数组
             if last_complete_pos > 0:
                 # 截取到最后一个完整对象的位置，并添加 ]
                 truncated_json = json_content[:last_complete_pos + 1] + "]"
-                    
+
                 # 尝试修复并解析
                 truncated_json = self._fix_json_format(truncated_json)
-                    
+
                 try:
                     data = json.loads(truncated_json)
                     if len(data) > 0:
                         logger.info(f"从截断JSON中成功恢复 {len(data)} 个问题")
                     else:
                         logger.debug("截断JSON恢复成功但未提取到问题")
-                        
+
                     for item in data:
                         question = ParsedQuestion(
                             title=item.get("title", ""),
@@ -787,19 +787,19 @@ URL: {url}
                         )
                         if question.title and question.answer:
                             questions.append(question)
-                        
+
                     return questions
                 except json.JSONDecodeError as e:
                     logger.debug(f"截断JSON恢复失败: {str(e)}")
             else:
                 logger.warning("未找到完整的JSON对象")
-            
+
         except Exception as e:
             logger.error(f"截断JSON恢复过程出错: {str(e)}")
             logger.error(f"完整响应内容:\n{response}")
             import traceback
             logger.error(traceback.format_exc())
-            
+
         return questions
 
     def _extract_tags(self, text: str) -> List[str]:
@@ -865,7 +865,7 @@ URL: {url}
         """
         if not self.client:
             raise Exception("大模型客户端未初始化")
-        
+
         # 确保token限制已初始化
         if self.max_output_tokens is None:
             self._detect_model_limits()
@@ -886,10 +886,10 @@ URL: {url}
                     raise Exception("大模型未返回内容")
                 return content
             except Exception as e:
-                logger.warning(f"大模型调用失败（第{attempt+1}次）: {str(e)}")
+                logger.warning(f"大模型调用失败（第{attempt + 1}次）: {str(e)}")
                 if attempt < max_retries - 1:
                     import time
 
-                    time.sleep(2**attempt)  # 指数退避
+                    time.sleep(2 ** attempt)  # 指数退避
 
         raise Exception(f"大模型调用失败，已重试{max_retries}次")
