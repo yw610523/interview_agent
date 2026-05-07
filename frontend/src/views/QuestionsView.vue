@@ -70,55 +70,57 @@
 
           <a-empty v-if="questions.length === 0" description="点击【生成题目】按钮开始生成面试题" />
 
-          <a-collapse v-else v-model:activeKey="activeKeys" accordion>
-            <a-collapse-panel 
-              v-for="(question, index) in questions" 
-              :key="index.toString()"
-            >
-              <template #header>
-                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                  <div style="flex: 1;">
-                    <strong style="font-size: 16px;">问题 {{ index + 1 }}: {{ question.title }}</strong>
+          <div class="questions-container" v-else>
+            <a-collapse v-model:activeKey="activeKeys" accordion>
+              <a-collapse-panel 
+                v-for="(question, index) in questions" 
+                :key="index.toString()"
+              >
+                <template #header>
+                  <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <div style="flex: 1;">
+                      <strong style="font-size: 16px;">问题 {{ index + 1 }}: {{ question.title }}</strong>
+                    </div>
+                    <div style="margin-left: 16px;">
+                      <a-tag color="blue">{{ question.difficulty || 'medium' }}</a-tag>
+                      <a-tag v-if="question.category" color="green">{{ question.category }}</a-tag>
+                      <a-tag v-for="tag in (question.tags || [])" :key="tag" color="purple">
+                        {{ tag }}
+                      </a-tag>
+                    </div>
                   </div>
-                  <div style="margin-left: 16px;">
-                    <a-tag color="blue">{{ question.difficulty || 'medium' }}</a-tag>
-                    <a-tag v-if="question.category" color="green">{{ question.category }}</a-tag>
-                    <a-tag v-for="tag in (question.tags || [])" :key="tag" color="purple">
-                      {{ tag }}
-                    </a-tag>
-                  </div>
-                </div>
-              </template>
+                </template>
 
-              <div class="answer-content">
-                <MarkdownRenderer :content="question.answer" />
-                
-                <a-divider />
-                
-                <div class="question-meta">
-                  <a-space direction="vertical" size="small">
-                    <div>
-                      <strong>来源:</strong> 
-                      <a :href="question.source_url" target="_blank">
-                        {{ question.source_url }}
-                      </a>
-                    </div>
-                    <div v-if="question.importance_score">
-                      <strong>重要性评分:</strong> 
-                      <a-progress 
-                        :percent="Math.round(question.importance_score * 100)" 
-                        :stroke-color="{
-                          '0%': '#108ee9',
-                          '100%': '#87d068',
-                        }"
-                        style="width: 200px; display: inline-block; margin-left: 8px;"
-                      />
-                    </div>
-                  </a-space>
+                <div class="answer-content">
+                  <MarkdownRenderer :content="question.answer" />
+                  
+                  <a-divider />
+                  
+                  <div class="question-meta">
+                    <a-space direction="vertical" size="small">
+                      <div>
+                        <strong>来源:</strong> 
+                        <a :href="question.source_url" target="_blank">
+                          {{ question.source_url }}
+                        </a>
+                      </div>
+                      <div v-if="question.importance_score">
+                        <strong>重要性评分:</strong> 
+                        <a-progress 
+                          :percent="Math.round(question.importance_score * 100)" 
+                          :stroke-color="{
+                            '0%': '#108ee9',
+                            '100%': '#87d068',
+                          }"
+                          style="width: 200px; display: inline-block; margin-left: 8px;"
+                        />
+                      </div>
+                    </a-space>
+                  </div>
                 </div>
-              </div>
-            </a-collapse-panel>
-          </a-collapse>
+              </a-collapse-panel>
+            </a-collapse>
+          </div>
         </a-card>
       </a-col>
     </a-row>
@@ -219,6 +221,32 @@ const collapseAll = () => {
 
 .question-meta a {
   word-break: break-all;
+}
+
+/* 题目列表容器 - 添加滚动条 */
+.questions-container {
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+/* 自定义滚动条样式 */
+.questions-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.questions-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.questions-container::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+.questions-container::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
 }
 
 :deep(.ant-collapse-header) {
