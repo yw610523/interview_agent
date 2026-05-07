@@ -12,7 +12,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # 后端构建阶段
-FROM python:3.11-slim AS backend-builder
+FROM python:3.10-slim AS backend-builder
 
 # 设置工作目录
 WORKDIR /app
@@ -44,7 +44,7 @@ RUN apk add --no-cache python3 py3-pip curl
 
 # 复制后端代码和依赖
 COPY --from=backend-builder /app /app
-COPY --from=backend-builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=backend-builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 COPY --from=backend-builder /usr/local/bin /usr/local/bin
 
 # 复制前端构建产物到 Nginx
