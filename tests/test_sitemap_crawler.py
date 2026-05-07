@@ -168,7 +168,8 @@ class TestSitemapCrawler:
 
     @patch('app.services.sitemap_crawler.SitemapParser')
     @patch('app.services.sitemap_crawler.URLScanner')
-    def test_crawl_with_progress_callback(self, mock_scanner_class, mock_parser_class):
+    def test_crawl_with_progress_callback(
+            self, mock_scanner_class, mock_parser_class):
         """测试带进度回调的爬取。"""
         mock_parser = Mock()
         mock_parser.parse.return_value = ['https://example.com/page1']

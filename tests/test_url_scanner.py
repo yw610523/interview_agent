@@ -2,8 +2,8 @@
 URLScanner 模块测试。
 """
 
-import pytest
 from unittest.mock import patch, Mock
+
 from app.services.url_scanner import URLScanner, ScanResult
 
 

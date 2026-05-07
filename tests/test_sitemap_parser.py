@@ -66,7 +66,8 @@ class TestSitemapParser:
 
         assert content == SAMPLE_SITEMAP_XML
         assert parser._xml_content == SAMPLE_SITEMAP_XML
-        mock_get.assert_called_once_with("https://example.com/sitemap.xml", timeout=30)
+        mock_get.assert_called_once_with(
+            "https://example.com/sitemap.xml", timeout=30)
 
     @patch('app.services.sitemap_parser.requests.get')
     def test_parse(self, mock_get):

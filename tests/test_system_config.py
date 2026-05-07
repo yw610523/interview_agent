@@ -6,20 +6,20 @@
 """
 
 import requests
-import json
 
 BASE_URL = "http://localhost:8000/api"
+
 
 def test_get_system_config():
     """测试获取系统配置"""
     print("=" * 60)
     print("测试1: 获取系统配置")
     print("=" * 60)
-    
+
     try:
         response = requests.get(f"{BASE_URL}/system-config")
         print(f"状态码: {response.status_code}")
-        
+
         if response.status_code == 200:
             data = response.json()
             print(f"响应状态: {data['status']}")
@@ -31,15 +31,16 @@ def test_get_system_config():
             print(f"❌ 测试失败: {response.text}")
     except Exception as e:
         print(f"❌ 测试失败: {str(e)}")
-    
+
     print()
+
 
 def test_update_llm_config():
     """测试更新模型配置"""
     print("=" * 60)
     print("测试2: 更新模型配置")
     print("=" * 60)
-    
+
     config = {
         "openai_api_key": "test-key-123",
         "openai_api_base": "https://api.openai.com/v1",
@@ -47,7 +48,7 @@ def test_update_llm_config():
         "openai_embedding_model": "text-embedding-3-small",
         "embedding_dimension": 1536
     }
-    
+
     try:
         response = requests.put(
             f"{BASE_URL}/llm-config",
@@ -55,7 +56,7 @@ def test_update_llm_config():
             headers={"Content-Type": "application/json"}
         )
         print(f"状态码: {response.status_code}")
-        
+
         if response.status_code == 200:
             data = response.json()
             print(f"响应状态: {data['status']}")
@@ -65,15 +66,16 @@ def test_update_llm_config():
             print(f"❌ 测试失败: {response.text}")
     except Exception as e:
         print(f"❌ 测试失败: {str(e)}")
-    
+
     print()
+
 
 def test_update_redis_config():
     """测试更新Redis配置"""
     print("=" * 60)
     print("测试3: 更新Redis配置")
     print("=" * 60)
-    
+
     try:
         response = requests.put(
             f"{BASE_URL}/redis-config",
@@ -81,7 +83,7 @@ def test_update_redis_config():
             headers={"Content-Type": "application/json"}
         )
         print(f"状态码: {response.status_code}")
-        
+
         if response.status_code == 200:
             data = response.json()
             print(f"响应状态: {data['status']}")
@@ -91,15 +93,16 @@ def test_update_redis_config():
             print(f"❌ 测试失败: {response.text}")
     except Exception as e:
         print(f"❌ 测试失败: {str(e)}")
-    
+
     print()
+
 
 def test_update_email_config():
     """测试更新邮件配置"""
     print("=" * 60)
     print("测试4: 更新邮件配置")
     print("=" * 60)
-    
+
     config = {
         "smtp_server": "smtp.qq.com",
         "smtp_port": 587,
@@ -107,7 +110,7 @@ def test_update_email_config():
         "smtp_password": "test-password",
         "smtp_test_user": "test@example.com"
     }
-    
+
     try:
         response = requests.put(
             f"{BASE_URL}/email-config",
@@ -115,7 +118,7 @@ def test_update_email_config():
             headers={"Content-Type": "application/json"}
         )
         print(f"状态码: {response.status_code}")
-        
+
         if response.status_code == 200:
             data = response.json()
             print(f"响应状态: {data['status']}")
@@ -125,25 +128,27 @@ def test_update_email_config():
             print(f"❌ 测试失败: {response.text}")
     except Exception as e:
         print(f"❌ 测试失败: {str(e)}")
-    
+
     print()
+
 
 def main():
     """运行所有测试"""
     print("\n" + "=" * 60)
     print("系统配置API测试")
     print("=" * 60 + "\n")
-    
+
     print("注意: 请确保后端服务正在运行 (python -m app.main)\n")
-    
+
     test_get_system_config()
     test_update_llm_config()
     test_update_redis_config()
     test_update_email_config()
-    
+
     print("=" * 60)
     print("测试完成")
     print("=" * 60)
+
 
 if __name__ == "__main__":
     main()
