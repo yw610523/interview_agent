@@ -11,8 +11,8 @@ RUN npm install --production=false
 COPY frontend/ ./
 RUN npm run build
 
-# 后端构建阶段
-FROM docker.m.daocloud.io/library/python:3.10-slim AS backend-builder
+# 后端构建阶段 - 使用完整Python镜像（预装编译工具）
+FROM docker.m.daocloud.io/library/python:3.10 AS backend-builder
 
 # 设置工作目录和环境变量
 WORKDIR /app
@@ -20,10 +20,6 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# 安装编译依赖（uvicorn、lxml等需要）
-RUN apt-get update && apt-get install -y --no-install-recommends gcc \
-    && rm -rf /var/lib/apt/lists/*
 
 # 先复制并安装 Python 依赖(利用 Docker 层缓存)
 COPY requirements.txt ./requirements.txt
