@@ -32,6 +32,7 @@ services:
       - interview-network
     volumes:
       - ./crawl_results:/app/crawl_results
+      - ../app/config:/app/app/config
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "wget", "-qO-", "http://localhost:9023/" ]
