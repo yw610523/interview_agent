@@ -48,45 +48,12 @@
 
     <!-- 搜索结果 -->
     <div v-if="searchResults.length > 0" class="results-container">
-      <a-list
-        item-layout="vertical"
-        :data-source="searchResults"
-        :pagination="{
-          pageSize: 5,
-          showSizeChanger: false,
-          showTotal: (total) => `共 ${total} 条结果`
-        }"
-      >
-        <template #renderItem="{ item }">
-          <a-list-item>
-            <a-card hoverable class="result-card">
-              <template #title>
-                <div class="card-header">
-                  <span class="question-title">{{ item.title }}</span>
-                  <a-space>
-                    <a-tag color="blue">{{ item.difficulty || 'medium' }}</a-tag>
-                    <a-tag v-if="item.category" color="green">{{ item.category }}</a-tag>
-                    <a-tag v-for="tag in (item.tags || [])" :key="tag" color="purple">
-                      {{ tag }}
-                    </a-tag>
-                  </a-space>
-                </div>
-              </template>
-              
-              <MarkdownRenderer :content="item.answer" />
-              
-              <a-divider style="margin: 12px 0;" />
-              
-              <div class="source-info">
-                <strong>来源:</strong> 
-                <a :href="item.source_url" target="_blank">
-                  {{ item.source_url }}
-                </a>
-              </div>
-            </a-card>
-          </a-list-item>
-        </template>
-      </a-list>
+      <QuestionList
+        :questions="searchResults"
+        :pagination="true"
+        :page-size="5"
+        @item-click="showQuestionDetail"
+      />
     </div>
 
     <!-- 空状态提示 -->
@@ -94,6 +61,13 @@
       v-else-if="hasSearched" 
       description="没有找到相关的面试题，请尝试其他关键词" 
       class="empty-state"
+    />
+
+    <!-- 题目详情模态框 -->
+    <QuestionDetailModal
+      v-model="detailModalVisible"
+      :question="currentQuestion"
+      :index="currentIndex"
     />
 
     <!-- 页脚统计信息 -->
@@ -111,7 +85,8 @@ import { ref, onMounted } from 'vue'
 import { questionApi, crawlerApi } from '../services'
 import { message } from 'ant-design-vue'
 import { SearchOutlined } from '@ant-design/icons-vue'
-import MarkdownRenderer from '../components/MarkdownRenderer.vue'
+import QuestionList from '../components/QuestionList.vue'
+import QuestionDetailModal from '../components/QuestionDetailModal.vue'
 
 const questionCount = ref(0)
 const lastCrawlTime = ref('')
@@ -121,6 +96,11 @@ const searchQuery = ref('')
 const searching = ref(false)
 const searchResults = ref([])
 const hasSearched = ref(false)
+
+// 模态框相关
+const detailModalVisible = ref(false)
+const currentQuestion = ref(null)
+const currentIndex = ref(0)
 
 // 加载统计数据
 const loadStats = async () => {
@@ -163,6 +143,13 @@ const handleSearch = async () => {
   } finally {
     searching.value = false
   }
+}
+
+// 显示题目详情
+const showQuestionDetail = (index) => {
+  currentIndex.value = index
+  currentQuestion.value = searchResults.value[index]
+  detailModalVisible.value = true
 }
 
 onMounted(() => {
@@ -270,19 +257,6 @@ onMounted(() => {
   padding: 0 20px;
   font-size: 14px;
   margin: 0;
-}
-
-.results-container {
-  margin-top: 24px;
-  width: 100%;
-}
-
-.results-container :deep(.ant-list) {
-  padding: 0;
-}
-
-.results-container :deep(.ant-list-item) {
-  padding: 0;
 }
 
 .footer {
