@@ -11,7 +11,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.services.firecrawl_mcp import FirecrawlMCPService
+from app.services.firecrawl_mcp import FirecrawlMCPService  # noqa: E402
 
 
 async def test_firecrawl_scrape():

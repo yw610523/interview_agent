@@ -128,6 +128,10 @@ if [ ! -f "$MANAGE_SCRIPT" ]; then
     exit 1
 fi
 
+# 首先初始化子模块（确保 docker-compose.yaml 存在）
+log_info "初始化 Firecrawl 子模块..."
+bash "$MANAGE_SCRIPT" init
+
 # 使用 manage 脚本构建和启动
 log_info "使用 firecrawl-manage.sh 构建 Firecrawl..."
 bash "$MANAGE_SCRIPT" build
