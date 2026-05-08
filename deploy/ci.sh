@@ -94,20 +94,51 @@ else
     log_info "✅ .env 文件已存在"
 fi
 
-# 步骤 2: 进入部署目录
-log_info "步骤 2: 进入部署目录..."
-cd "$SCRIPT_DIR"
+# 步骤 2: 初始化并更新 Firecrawl Submodule
+log_info "步骤 2: 初始化 Firecrawl Submodule..."
 
-if [ ! -f "$COMPOSE_FILE" ]; then
-    log_error "${COMPOSE_FILE} 文件不存在！"
+# 检查 submodule 是否存在
+if [ ! -d "${PROJECT_DIR}/submodules/firecrawl" ]; then
+    log_info "Submodule 不存在，正在克隆..."
+    cd "$PROJECT_DIR"
+    git submodule add https://github.com/yw610523/firecrawl.git submodules/firecrawl
+fi
+
+# 更新 submodule (拉取最新代码)
+log_info "更新 Firecrawl 源码..."
+cd "$PROJECT_DIR"
+git submodule update --init --recursive
+
+# 进入 submodule 拉取最新代码
+cd "${PROJECT_DIR}/submodules/firecrawl"
+log_info "拉取 Firecrawl 最新代码..."
+git pull origin main || log_warn "⚠️  拉取失败，使用当前版本"
+
+# 返回项目目录
+cd "$SCRIPT_DIR"
+log_info "✅ Firecrawl Submodule 准备完成"
+
+# 步骤 3: 构建并启动 Firecrawl(使用 firecrawl-manage.sh)
+log_info "步骤 3: 构建并启动 Firecrawl..."
+
+# 检查 manage 脚本是否存在
+MANAGE_SCRIPT="${SCRIPT_DIR}/firecrawl-manage.sh"
+if [ ! -f "$MANAGE_SCRIPT" ]; then
+    log_error "firecrawl-manage.sh 不存在!"
     exit 1
 fi
 
-log_info "✅ 部署目录: $SCRIPT_DIR"
-log_info "✅ 使用配置文件: $COMPOSE_FILE"
+# 使用 manage 脚本构建和启动
+log_info "使用 firecrawl-manage.sh 构建 Firecrawl..."
+bash "$MANAGE_SCRIPT" build
 
-# 步骤 3: 登录 GHCR 并拉取最新镜像
-log_info "步骤 3: 拉取最新 Docker 镜像..."
+log_info "启动 Firecrawl 服务..."
+bash "$MANAGE_SCRIPT" start
+
+log_info "✅ Firecrawl 部署完成"
+
+# 步骤 4: 拉取最新 App 镜像
+log_info "步骤 4: 拉取最新 App 镜像..."
 
 # 检查是否配置了 GHCR_TOKEN（可选，公开仓库不需要）
 if [ -n "$GHCR_TOKEN" ]; then
@@ -116,24 +147,21 @@ if [ -n "$GHCR_TOKEN" ]; then
 fi
 
 # 拉取最新镜像
-if docker compose -f "$COMPOSE_FILE" pull app; then
-    log_info "✅ 镜像拉取成功"
+if docker compose -f "${SCRIPT_DIR}/$COMPOSE_FILE" pull app; then
+    log_info "✅ App 镜像拉取成功"
 else
-    log_error "❌ 镜像拉取失败！"
-    log_error "请检查："
-    log_error "  1. 网络连接是否正常"
-    log_error "  2. 如果是私有仓库，是否配置了 GHCR_TOKEN 和 GHCR_USERNAME"
-    exit 1
+    log_warn "⚠️  App 镜像拉取失败，将使用本地构建或已有镜像"
+    log_warn "如果是首次部署，请确保已构建 App 镜像"
 fi
 
-# 步骤 4: 停止旧容器
-log_info "步骤 4: 停止旧容器..."
-docker compose -f "$COMPOSE_FILE" down --remove-orphans || true
+# 步骤 5: 停止旧容器
+log_info "步骤 5: 停止旧容器..."
+docker compose -f "${SCRIPT_DIR}/$COMPOSE_FILE" down --remove-orphans || true
 log_info "✅ 旧容器已停止"
 
-# 步骤 5: 启动新容器
-log_info "步骤 5: 启动新容器..."
-docker compose -f "$COMPOSE_FILE" up -d
+# 步骤 6: 启动新容器
+log_info "步骤 6: 启动新容器..."
+docker compose -f "${SCRIPT_DIR}/$COMPOSE_FILE" up -d
 
 if [ $? -eq 0 ]; then
     log_info "✅ 容器启动成功"
@@ -142,8 +170,8 @@ else
     exit 1
 fi
 
-# 步骤 6: 健康检查
-log_info "步骤 6: 执行健康检查..."
+# 步骤 7: 健康检查
+log_info "步骤 7: 执行健康检查..."
 sleep 10
 
 MAX_RETRIES=5
@@ -166,8 +194,8 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$IS_HEALTHY" = false ]; do
     fi
 done
 
-# 步骤 7: 清理旧镜像
-log_info "步骤 7: 清理旧镜像..."
+# 步骤 8: 清理旧镜像
+log_info "步骤 8: 清理旧镜像..."
 docker image prune -f > /dev/null 2>&1 || true
 log_info "✅ 清理完成"
 
