@@ -60,7 +60,7 @@
           </a-menu>
         </a-drawer>
         
-        <a-layout-content style="padding: 0; background: #ffffff; overflow: hidden;">
+        <a-layout-content style="padding: 0; background: #ffffff; overflow-y: auto; -webkit-overflow-scrolling: touch;">
           <router-view />
         </a-layout-content>
         
@@ -133,6 +133,12 @@ html, body {
   
   .mobile-menu-toggle {
     display: block;
+    margin-left: auto; /* 推到最右边 */
+  }
+  
+  .logo {
+    margin-right: 0; /* 移除右侧边距 */
+    flex: 1; /* 占据剩余空间 */
   }
   
   .logo h1 {
@@ -140,7 +146,8 @@ html, body {
   }
   
   .header {
-    padding: 0 16px;
+    padding: 0 12px;
+    justify-content: space-between; /* logo 和菜单分列两侧 */
   }
 }
 </style>

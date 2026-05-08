@@ -7,8 +7,6 @@
     :body-style="{ padding: '24px', maxHeight: modalMaxHeight, overflowY: 'auto' }"
     :class="['question-detail-modal', { 'fullscreen': isFullscreen }]"
     @cancel="handleClose"
-    wrap-class-name="draggable-modal"
-    v-draggable
   >
     <template #closeIcon>
       <a-button type="text" size="small" @click="handleClose">
@@ -77,17 +75,6 @@
           </a-descriptions-item>
         </a-descriptions>
       </div>
-      
-      <!-- 缩放手柄 -->
-      <div 
-        v-if="!isFullscreen" 
-        class="resize-handle"
-        @mousedown="startResize"
-      >
-        <svg viewBox="0 0 10 10" width="10" height="10">
-          <path d="M 10 0 L 10 10 L 0 10" stroke="#999" stroke-width="1.5" fill="none"/>
-        </svg>
-      </div>
     </div>
   </a-modal>
 </template>
@@ -118,13 +105,6 @@ const visible = ref(false)
 const isFullscreen = ref(false)
 const modalWidth = ref(800)
 const modalMaxHeight = ref('70vh')
-
-// 缩放相关
-let isResizing = false
-let startX = 0
-let startY = 0
-let startWidth = 0
-let startHeight = 0
 
 // 监听外部传入的 visible
 watch(() => props.modelValue, (newVal) => {
@@ -158,60 +138,27 @@ const toggleFullscreen = () => {
   }
 }
 
-// ESC 键关闭模态框
-const handleEscKey = (e) => {
-  if (e.key === 'Escape' && visible.value) {
+// ESC 键关闭模态框，Ctrl+Enter 切换全屏
+const handleKeyDown = (e) => {
+  if (!visible.value) return
+  
+  // ESC 关闭
+  if (e.key === 'Escape') {
     handleClose()
   }
-}
-
-// 开始缩放
-const startResize = (e) => {
-  if (isFullscreen.value) return
-  
-  isResizing = true
-  startX = e.clientX
-  startY = e.clientY
-  
-  const modal = document.querySelector('.question-detail-modal .ant-modal')
-  if (modal) {
-    startWidth = modal.offsetWidth
-    startHeight = modal.offsetHeight
+  // Ctrl+Enter 切换全屏
+  if (e.ctrlKey && e.key === 'Enter') {
+    e.preventDefault()
+    toggleFullscreen()
   }
-  
-  e.preventDefault()
-  e.stopPropagation()
-}
-
-// 缩放中
-const doResize = (e) => {
-  if (!isResizing) return
-  
-  const deltaX = e.clientX - startX
-  const deltaY = e.clientY - startY
-  
-  const newWidth = Math.max(400, startWidth + deltaX)
-  const newHeight = Math.max(300, startHeight + deltaY)
-  
-  modalWidth.value = newWidth
-  modalMaxHeight.value = `${newHeight}px`
-}
-
-// 结束缩放
-const stopResize = () => {
-  isResizing = false
 }
 
 onMounted(() => {
-  document.addEventListener('keydown', handleEscKey)
-  document.addEventListener('mousemove', doResize)
-  document.addEventListener('mouseup', stopResize)
+  document.addEventListener('keydown', handleKeyDown)
 })
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleEscKey)
-  document.removeEventListener('mousemove', doResize)
-  document.removeEventListener('mouseup', stopResize)
+  document.removeEventListener('keydown', handleKeyDown)
 })
 </script>
 
@@ -254,31 +201,6 @@ onUnmounted(() => {
   margin-top: 16px;
 }
 
-/* 缩放手柄 */
-.resize-handle {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 20px;
-  height: 20px;
-  cursor: nwse-resize;
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
-  padding: 4px;
-  user-select: none;
-  z-index: 10;
-}
-
-.resize-handle:hover svg path {
-  stroke: #4096ff;
-  stroke-width: 2;
-}
-
-.resize-handle:active svg path {
-  stroke: #1677ff;
-}
-
 /* 模态框全屏样式 */
 :deep(.question-detail-modal.fullscreen .ant-modal) {
   top: 0 !important;
@@ -302,19 +224,5 @@ onUnmounted(() => {
 :deep(.question-detail-modal.fullscreen .ant-modal-body) {
   flex: 1;
   overflow-y: auto !important;
-}
-
-/* 可拖拽模态框 */
-:deep(.draggable-modal .ant-modal) {
-  cursor: move;
-}
-
-:deep(.draggable-modal .ant-modal-header) {
-  cursor: move;
-  user-select: none;
-}
-
-:deep(.draggable-modal .ant-modal-body) {
-  cursor: default;
 }
 </style>
