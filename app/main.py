@@ -29,6 +29,8 @@ from app.services.sitemap_crawler import SitemapCrawler
 from app.services.vector_service import VectorService, VectorRecord
 # 导入任务管理器
 from app.services.crawl_task_manager import crawl_task_manager, TaskStatus
+# 导入反馈服务
+from app.services.feedback_service import FeedbackService
 
 app = FastAPI(title="Interview AI Agent")
 
@@ -47,12 +49,12 @@ sse_log_queues: Dict[str, Queue] = {}
 # 初始化服务
 llm_service = LLMService()
 vector_service = VectorService()
+feedback_service = FeedbackService()
 
 # 设置配置热加载管理器的服务引用
 config_reload_manager.set_services(llm_service, vector_service)
 
 # 定义面试题数据模型
-
 
 class InterviewQuestion(BaseModel):
     title: str
@@ -65,7 +67,6 @@ class InterviewQuestion(BaseModel):
 
 # 爬取结果模型
 
-
 class CrawlResult(BaseModel):
     status: str
     message: str
@@ -76,12 +77,10 @@ class CrawlResult(BaseModel):
 
 # 搜索结果模型
 
-
 class SearchResult(BaseModel):
     query: str
     results: List[Dict[str, Any]]
     total: int
-
 
 @app.post("/api/questions/ingest", summary="接收并存储面试题")
 async def ingest_question(questions: List[InterviewQuestion]):
@@ -112,7 +111,6 @@ async def ingest_question(questions: List[InterviewQuestion]):
     except Exception as e:
         logger.error(f"Ingest error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 def run_crawler() -> Dict[str, Any]:
     """
@@ -245,7 +243,6 @@ def run_crawler() -> Dict[str, Any]:
         logger.error(f"爬虫任务失败: {str(e)}")
         return {"status": "error", "message": str(e)}
 
-
 @app.get("/api/crawl/run", summary="手动触发爬虫任务")
 async def trigger_crawl():
     """
@@ -256,7 +253,6 @@ async def trigger_crawl():
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/api/crawl/run-async", summary="异步触发爬虫任务")
 async def trigger_crawl_async():
@@ -462,7 +458,6 @@ async def trigger_crawl_async():
         logger.error(f"启动异步爬虫任务失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/crawl/task/{task_id}", summary="获取爬虫任务状态")
 async def get_crawl_task_status(task_id: str):
     """
@@ -474,7 +469,6 @@ async def get_crawl_task_status(task_id: str):
         raise HTTPException(status_code=404, detail="任务不存在")
 
     return task.to_dict()
-
 
 @app.post("/api/crawl/stop/{task_id}", summary="停止爬虫任务")
 async def stop_crawl_task(task_id: str):
@@ -492,14 +486,12 @@ async def stop_crawl_task(task_id: str):
         "task_id": task_id
     }
 
-
 @app.get("/api/crawl/tasks", summary="获取所有爬虫任务")
 async def get_all_crawl_tasks():
     """
     获取所有爬虫任务的状态
     """
     return crawl_task_manager.get_all_tasks()
-
 
 @app.get("/api/crawl/status", summary="获取爬虫状态")
 async def get_crawl_status():
@@ -585,7 +577,6 @@ async def get_crawl_status():
 
     return status_info
 
-
 @app.get("/api/questions/search", summary="搜索面试题")
 async def search_questions(
         query: str,
@@ -593,6 +584,7 @@ async def search_questions(
         tags: Optional[List[str]] = Query(None),
         difficulty: Optional[List[str]] = Query(None),
         category: Optional[List[str]] = Query(None),
+        search_mode: str = Query("semantic", regex="^(semantic|exact|hybrid)$"),
 ):
     """
     根据关键词搜索面试题
@@ -603,6 +595,7 @@ async def search_questions(
         tags: 标签过滤（如：Python,算法）
         difficulty: 难度过滤（easy/medium/hard）
         category: 分类过滤
+        search_mode: 搜索模式（semantic=语义搜索, exact=精确搜索, hybrid=混合搜索）
     """
     try:
         # 构建过滤条件
@@ -614,15 +607,39 @@ async def search_questions(
         if category:
             filters["category"] = category
 
-        # 搜索
-        results = vector_service.search(query, limit, filters if filters else None)
+        # 根据搜索模式执行不同的搜索策略
+        if search_mode == "semantic":
+            # 纯语义搜索（向量相似度）
+            results = vector_service.search(query, limit, filters if filters else None)
+            logger.info(f"语义搜索: '{query}' -> {len(results)} 个结果")
+
+        elif search_mode == "exact":
+            # 纯精确搜索（关键词匹配）
+            results = vector_service.exact_search(query, limit, filters if filters else None)
+            logger.info(f"精确搜索: '{query}' -> {len(results)} 个结果")
+
+        elif search_mode == "hybrid":
+            # 混合搜索：结合语义和精确搜索结果
+            semantic_results = vector_service.search(query, limit * 2, filters if filters else None)
+            exact_results = vector_service.exact_search(query, limit * 2, filters if filters else None)
+
+            # 合并结果并去重（优先保留精确匹配的高分结果）
+            merged_results = vector_service.merge_search_results(
+                semantic_results, exact_results, limit
+            )
+            results = merged_results
+            logger.info(f"混合搜索: '{query}' -> {len(results)} 个结果 (语义:{len(semantic_results)}, 精确:{len(exact_results)})")
+
+        else:
+            raise HTTPException(status_code=400, detail=f"不支持的搜索模式: {search_mode}")
 
         return SearchResult(query=query, results=results, total=len(results))
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Search error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/questions/count", summary="获取面试题总数")
 async def get_question_count():
@@ -635,7 +652,6 @@ async def get_question_count():
     except Exception as e:
         logger.error(f"Count error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/questions/generate-batch", summary="批量生成面试题")
 async def generate_batch_questions(
@@ -705,7 +721,6 @@ async def generate_batch_questions(
         logger.error(f"批量生成面试题失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/questions/generate", summary="使用大模型生成答案")
 async def generate_answer(question: str):
     """
@@ -718,6 +733,84 @@ async def generate_answer(question: str):
         logger.error(f"Generate answer error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/questions/recommended", summary="智能推荐题目")
+async def get_recommended_questions(
+    limit: int = Query(20, ge=1, le=100, description="返回数量"),
+    exclude_mastered: bool = Query(True, description="是否排除已掌握的题目"),
+    use_rerank: bool = Query(False, description="是否使用 Rerank 模型重排序")
+):
+    """
+    基于用户反馈和艾宾浩斯曲线智能推荐题目
+
+    参数:
+        limit: 返回数量
+        exclude_mastered: 是否排除完全掌握的题目（mastery_level=5）
+        use_rerank: 是否使用 Rerank 模型进行重排序（需要配置 RERANK_ENABLED=true）
+    """
+    try:
+        # 获取所有题目
+        all_questions = vector_service.get_all()
+
+        if not all_questions:
+            return {"questions": [], "total": 0}
+
+        # 计算每个题目的优先级分数
+        scored_questions = []
+        for question in all_questions:
+            feedback = feedback_service.get_feedback(question['id'])
+
+            # 如果排除已掌握的题目
+            if exclude_mastered and feedback and feedback.mastery_level >= 5:
+                continue
+
+            priority_score = feedback_service.calculate_priority_score(question, feedback)
+
+            scored_questions.append({
+                **question,
+                "priority_score": priority_score,
+                "mastery_level": feedback.mastery_level if feedback else 0,
+                "is_favorite": feedback.is_favorite if feedback else False,
+                "is_wrong_book": feedback.is_wrong_book if feedback else False
+            })
+
+        # 按优先级分数降序排序
+        scored_questions.sort(key=lambda x: x['priority_score'], reverse=True)
+
+        # 如果启用 Rerank，先取更多候选，然后重排序
+        if use_rerank:
+            # 取 3 倍数量的候选题目
+            candidate_count = min(limit * 3, len(scored_questions))
+            candidates = scored_questions[:candidate_count]
+
+            # 构建用户画像（简化版：基于用户的错题本和收藏）
+            user_profile = "我需要复习以下类型的面试题"
+            wrong_books = feedback_service.get_wrong_book()
+            favorites = feedback_service.get_favorites()
+
+            if wrong_books or favorites:
+                # 如果有错题或收藏，可以构建更精确的用户画像
+                user_profile += (
+                    f"（共 {len(wrong_books)} 道错题，{len(favorites)} 道收藏）"
+                )
+
+            # 执行 Rerank
+            reranked = feedback_service.rerank_questions(
+                user_profile, candidates, limit
+            )
+            recommended = reranked
+        else:
+            # 直接返回前 limit 个
+            recommended = scored_questions[:limit]
+
+        return {
+            "questions": recommended,
+            "total": len(recommended),
+            "rerank_used": use_rerank and feedback_service.rerank_enabled
+        }
+
+    except Exception as e:
+        logger.error(f"Get recommended questions error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/questions/{question_id}", summary="获取单个面试题详情")
 async def get_question(question_id: str):
@@ -738,7 +831,6 @@ async def get_question(question_id: str):
         logger.error(f"Get question error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.delete("/api/questions/{question_id}", summary="删除面试题")
 async def delete_question(question_id: str):
     """
@@ -758,6 +850,183 @@ async def delete_question(question_id: str):
         logger.error(f"Delete question error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ==================== 用户反馈相关 API (RESTful) ====================
+
+@app.post("/api/questions/{question_id}/feedback", summary="提交题目反馈")
+async def submit_feedback(
+    question_id: str,
+    mastery_level: Optional[int] = Query(None, ge=0, le=5, description="掌握程度 0-5"),
+    is_favorite: Optional[bool] = Query(None, description="是否收藏"),
+    is_wrong_book: Optional[bool] = Query(None, description="是否加入错题本")
+):
+    """
+    提交题目反馈
+
+    参数:
+        question_id: 题目ID
+        mastery_level: 掌握程度 (0-5)，0=未学习，5=完全掌握
+        is_favorite: 是否收藏
+        is_wrong_book: 是否加入错题本
+    """
+    try:
+        feedback_data = {}
+        if mastery_level is not None:
+            feedback_data['mastery_level'] = mastery_level
+        if is_favorite is not None:
+            feedback_data['is_favorite'] = is_favorite
+        if is_wrong_book is not None:
+            feedback_data['is_wrong_book'] = is_wrong_book
+
+        if not feedback_data:
+            raise HTTPException(status_code=400, detail="至少提供一个反馈字段")
+
+        success = feedback_service.submit_feedback(question_id, feedback_data)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="提交反馈失败")
+
+        return {"status": "success", "message": "反馈已保存"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Submit feedback error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/questions/{question_id}/feedback", summary="获取题目反馈")
+async def get_question_feedback(question_id: str):
+    """
+    获取指定题目的用户反馈
+    """
+    try:
+        feedback = feedback_service.get_feedback(question_id)
+
+        if not feedback:
+            return {
+                "question_id": question_id,
+                "has_feedback": False
+            }
+
+        return {
+            "question_id": question_id,
+            "has_feedback": True,
+            "feedback": {
+                "mastery_level": feedback.mastery_level,
+                "last_reviewed_at": feedback.last_reviewed_at,
+                "review_count": feedback.review_count,
+                "next_review_at": feedback.next_review_at,
+                "is_favorite": feedback.is_favorite,
+                "is_wrong_book": feedback.is_wrong_book
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Get feedback error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/users/me/favorites", summary="获取我的收藏列表")
+async def get_favorites():
+    """
+    获取收藏的题目列表（带完整题目信息）
+    """
+    try:
+        favorite_ids = feedback_service.get_favorites()
+
+        if not favorite_ids:
+            return {"questions": [], "total": 0}
+
+        # 获取所有题目
+        all_questions = vector_service.get_all()
+        favorites = [q for q in all_questions if q['id'] in favorite_ids]
+
+        return {
+            "questions": favorites,
+            "total": len(favorites)
+        }
+
+    except Exception as e:
+        logger.error(f"Get favorites error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/users/me/favorites/{question_id}", summary="取消收藏")
+async def remove_from_favorites(question_id: str):
+    """
+    从收藏中移除题目
+    """
+    try:
+        success = feedback_service.remove_from_collection(question_id, 'favorite')
+
+        if not success:
+            raise HTTPException(status_code=500, detail="操作失败")
+
+        return {"status": "success", "message": "已取消收藏"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Remove from favorites error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/users/me/wrong-books", summary="获取我的错题本")
+async def get_wrong_book():
+    """
+    获取错题本中的题目列表（带完整题目信息）
+    """
+    try:
+        wrong_book_ids = feedback_service.get_wrong_book()
+
+        if not wrong_book_ids:
+            return {"questions": [], "total": 0}
+
+        # 获取所有题目
+        all_questions = vector_service.get_all()
+        wrong_books = [q for q in all_questions if q['id'] in wrong_book_ids]
+
+        return {
+            "questions": wrong_books,
+            "total": len(wrong_books)
+        }
+
+    except Exception as e:
+        logger.error(f"Get wrong book error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/users/me/wrong-books/{question_id}", summary="从错题本移除")
+async def remove_from_wrong_book(question_id: str):
+    """
+    从错题本中移除题目
+    """
+    try:
+        success = feedback_service.remove_from_collection(question_id, 'wrong_book')
+
+        if not success:
+            raise HTTPException(status_code=500, detail="操作失败")
+
+        return {"status": "success", "message": "已从错题本移除"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Remove from wrong book error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/system/weights/update", summary="手动更新权重")
+async def update_weights():
+    """
+    手动触发权重更新任务（基于艾宾浩斯曲线）
+    """
+    try:
+        updated_count = feedback_service.update_all_weights()
+
+        return {
+            "status": "success",
+            "message": f"已更新 {updated_count} 个题目的权重",
+            "updated_count": updated_count
+        }
+
+    except Exception as e:
+        logger.error(f"Update weights error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/questions", summary="获取所有面试题")
 async def get_all_questions(
@@ -783,7 +1052,6 @@ async def get_all_questions(
     except Exception as e:
         logger.error(f"Get all questions error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/debug/vector-status", summary="调试：查看向量数据库状态")
 async def debug_vector_status():
@@ -830,7 +1098,6 @@ async def debug_vector_status():
         logger.error(f"Debug vector status error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/debug/reset-index", summary="调试：重置向量索引")
 async def reset_vector_index():
     """
@@ -861,7 +1128,6 @@ async def reset_vector_index():
     except Exception as e:
         logger.error(f"Reset index error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/api/debug/merge-duplicates", summary="调试：合并重复问题")
 async def merge_duplicate_questions(
@@ -985,7 +1251,6 @@ async def merge_duplicate_questions(
         logger.error(f"Merge duplicates error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/crawl/single-page", summary="智能爬取单个页面")
 async def crawl_single_page(url: str):
     """
@@ -1081,7 +1346,6 @@ async def crawl_single_page(url: str):
     except Exception as e:
         logger.error(f"单页爬取失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/crawl/single-page/stream", summary="单页爬取实时日志流")
 async def crawl_single_page_stream(url: str):
@@ -1315,7 +1579,6 @@ async def crawl_single_page_stream(url: str):
         }
     )
 
-
 @app.get("/api/config", summary="获取爬虫配置")
 async def get_crawler_config():
     """
@@ -1336,7 +1599,6 @@ async def get_crawler_config():
     except Exception as e:
         logger.error(f"获取配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.put("/api/config", summary="更新爬虫配置")
 async def update_crawler_config(config_data: Dict[str, Any]):
@@ -1363,7 +1625,6 @@ async def update_crawler_config(config_data: Dict[str, Any]):
         logger.error(f"更新配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/scheduler-config", summary="获取定时任务配置")
 async def get_scheduler_config_api():
     """
@@ -1378,7 +1639,6 @@ async def get_scheduler_config_api():
     except Exception as e:
         logger.error(f"获取定时配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.put("/api/scheduler-config", summary="更新定时任务配置")
 async def update_scheduler_config(hour: int, minute: int):
@@ -1401,7 +1661,6 @@ async def update_scheduler_config(hour: int, minute: int):
     except Exception as e:
         logger.error(f"更新定时配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.put("/api/llm-config", summary="更新模型配置")
 async def update_llm_config(config_data: Dict[str, Any]):
@@ -1446,10 +1705,8 @@ async def update_llm_config(config_data: Dict[str, Any]):
         logger.error(f"更新模型配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 # Redis配置API已移除 - Redis运行在Docker容器内，使用固定的 redis://redis:6379
 # 如需从宿主机访问，可在 .env 中修改 REDIS_PORT
-
 
 @app.put("/api/email-config", summary="更新邮件配置")
 async def update_email_config(config_data: Dict[str, Any]):
@@ -1491,7 +1748,6 @@ async def update_email_config(config_data: Dict[str, Any]):
     except Exception as e:
         logger.error(f"更新邮件配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/api/test-email", summary="测试邮件发送")
 async def test_email():
@@ -1536,6 +1792,42 @@ async def test_email():
         logger.error(f"测试邮件发送失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"邮件发送失败: {str(e)}")
 
+@app.put("/api/rerank-config", summary="更新 Rerank 配置")
+async def update_rerank_config(config_data: Dict[str, Any]):
+    """
+    更新 Rerank 配置（支持热加载）
+    """
+    try:
+        from dotenv import set_key, find_dotenv
+
+        # 加载环境变量
+        dotenv_path = find_dotenv()
+        if not dotenv_path:
+            dotenv_path = '.env'
+
+        # 更新 Rerank 配置
+        rerank_mapping = {
+            'enabled': 'RERANK_ENABLED',
+            'model_name': 'RERANK_MODEL'
+        }
+
+        for key, value in config_data.items():
+            if key in rerank_mapping:
+                env_key = rerank_mapping[key]
+                if value is not None and value != '':
+                    set_key(dotenv_path, env_key, str(value))
+
+        # 重新加载反馈服务中的 Rerank 配置
+        feedback_service.reload_rerank_config()
+
+        return {
+            "status": "success",
+            "message": "Rerank 配置已更新（立即生效）",
+            "config": config_data
+        }
+    except Exception as e:
+        logger.error(f"更新 Rerank 配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/system-config", summary="获取系统配置")
 async def get_system_config():
@@ -1565,6 +1857,13 @@ async def get_system_config():
             "model_max_output_tokens": os.getenv("MODEL_MAX_OUTPUT_TOKENS", ""),
         }
 
+        # Rerank 配置
+        rerank_config = {
+            "enabled": os.getenv("RERANK_ENABLED", "false").lower() == "true",
+            "model_name": os.getenv("RERANK_MODEL", "rerank-sf"),
+            "description": "Rerank 模型复用 LLM 的 API Key 和 Base URL"
+        }
+
         # Redis配置（固定值）
         redis_config = {
             "redis_url": "redis://redis:6379",
@@ -1588,6 +1887,7 @@ async def get_system_config():
             "config": {
                 "crawler": crawler_config.to_dict(),
                 "llm": llm_config,
+                "rerank": rerank_config,
                 "redis": redis_config,
                 "email": email_config,
                 "scheduler": scheduler_cfg,
@@ -1607,7 +1907,6 @@ SCHEDULER_MINUTE = scheduler_config["minute"]
 
 # 添加定时任务：每天指定时间执行
 
-
 @scheduler.scheduled_job(CronTrigger(hour=SCHEDULER_HOUR, minute=SCHEDULER_MINUTE))
 def scheduled_crawl():
     """
@@ -1615,6 +1914,18 @@ def scheduled_crawl():
     """
     run_crawler()
 
+# 添加定时任务：每天凌晨2点更新题目权重
+@scheduler.scheduled_job(CronTrigger(hour=2, minute=0))
+def scheduled_update_weights():
+    """
+    定时更新题目权重（基于艾宾浩斯遗忘曲线）
+    """
+    logger.info("开始执行定时权重更新任务...")
+    try:
+        updated_count = feedback_service.update_all_weights()
+        logger.info(f"权重更新完成: 更新了 {updated_count} 个题目")
+    except Exception as e:
+        logger.error(f"定时权重更新任务失败: {str(e)}")
 
 if __name__ == "__main__":
     # 启动定时任务调度器

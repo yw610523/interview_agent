@@ -68,6 +68,11 @@ export const systemConfigApi = {
     return apiClient.put('/llm-config', config)
   },
 
+  // 更新 Rerank 配置
+  updateRerankConfig(config) {
+    return apiClient.put('/rerank-config', config)
+  },
+
   // 更新邮件配置
   updateEmailConfig(config) {
     return apiClient.put('/email-config', config)
@@ -93,10 +98,11 @@ export const questionApi = {
   },
 
   // 搜索面试题
-  searchQuestions(query, limit = 10, tags, difficulty, category) {
+  searchQuestions(query, limit = 10, tags, difficulty, category, searchMode = 'semantic') {
     const params = new URLSearchParams()
     params.append('query', query)
     params.append('limit', limit)
+    params.append('search_mode', searchMode)
     if (tags && tags.length > 0) {
       tags.forEach(tag => params.append('tags', tag))
     }
@@ -122,5 +128,53 @@ export const questionApi = {
   // 删除面试题
   deleteQuestion(questionId) {
     return apiClient.delete(`/questions/${questionId}`)
+  },
+
+  // 智能推荐题目
+  getRecommendedQuestions(limit = 20, excludeMastered = true, useRerank = false) {
+    return apiClient.get(`/questions/recommended?limit=${limit}&exclude_mastered=${excludeMastered}&use_rerank=${useRerank}`)
+  }
+}
+
+// 用户反馈相关 API (RESTful)
+export const feedbackApi = {
+  // 提交反馈
+  submitFeedback(questionId, { masteryLevel, isFavorite, isWrongBook }) {
+    const params = new URLSearchParams()
+    if (masteryLevel !== undefined && masteryLevel !== null) {
+      params.append('mastery_level', masteryLevel)
+    }
+    if (isFavorite !== undefined && isFavorite !== null) {
+      params.append('is_favorite', isFavorite)
+    }
+    if (isWrongBook !== undefined && isWrongBook !== null) {
+      params.append('is_wrong_book', isWrongBook)
+    }
+    return apiClient.post(`/questions/${questionId}/feedback?${params.toString()}`)
+  },
+
+  // 获取题目反馈
+  getFeedback(questionId) {
+    return apiClient.get(`/questions/${questionId}/feedback`)
+  },
+
+  // 获取收藏列表
+  getFavorites() {
+    return apiClient.get('/users/me/favorites')
+  },
+
+  // 取消收藏
+  removeFromFavorites(questionId) {
+    return apiClient.delete(`/users/me/favorites/${questionId}`)
+  },
+
+  // 获取错题本
+  getWrongBook() {
+    return apiClient.get('/users/me/wrong-books')
+  },
+
+  // 从错题本移除
+  removeFromWrongBook(questionId) {
+    return apiClient.delete(`/users/me/wrong-books/${questionId}`)
   }
 }
