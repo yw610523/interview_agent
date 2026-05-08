@@ -149,11 +149,15 @@ const showQuestionDetail = (index) => {
   max-width: 1200px;
   margin: 0 auto;
   padding: 24px;
+  min-height: calc(100vh - 112px); /* 减去 header 和 footer 高度 */
 }
 
 @media (max-width: 768px) {
   .questions-view {
-    padding: 8px;
+    padding: 12px;
+    min-height: calc(100vh - 100px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   
   .mobile-form {
@@ -174,6 +178,18 @@ const showQuestionDetail = (index) => {
   .mobile-form :deep(.ant-select),
   .mobile-form :deep(.ant-input) {
     width: 100% !important;
+  }
+  
+  /* 移动端按钮优化 */
+  .mobile-form :deep(.ant-btn) {
+    width: 100%;
+    height: 44px; /* 最小触摸目标 */
+    font-size: 16px;
+  }
+  
+  /* 移动端表单元素间距 */
+  .mobile-form :deep(.ant-form-item-label) {
+    padding-bottom: 4px;
   }
 }
 

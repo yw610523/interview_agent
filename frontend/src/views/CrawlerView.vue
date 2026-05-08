@@ -500,11 +500,15 @@ onUnmounted(() => {
   max-width: 1200px;
   margin: 0 auto;
   padding: 16px;
+  min-height: calc(100vh - 112px); /* 减去 header 和 footer 高度 */
 }
 
 @media (max-width: 768px) {
   .crawler-view {
-    padding: 8px;
+    padding: 12px;
+    min-height: calc(100vh - 100px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   
   :deep(.ant-descriptions-item-label),
@@ -520,6 +524,22 @@ onUnmounted(() => {
   
   :deep(.ant-form-item) {
     margin-bottom: 12px;
+    width: 100%;
+  }
+  
+  /* 移动端按钮优化 */
+  :deep(.ant-btn) {
+    min-height: 44px; /* 最小触摸目标 */
+    font-size: 16px;
+  }
+  
+  /* 移动端空间组件优化 */
+  :deep(.ant-space) {
+    flex-direction: column;
+    width: 100%;
+  }
+  
+  :deep(.ant-space-item) {
     width: 100%;
   }
 }
