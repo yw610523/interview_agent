@@ -114,38 +114,22 @@
 
       <!-- Redis配置 -->
       <a-tab-pane key="redis" tab="🗄️ Redis配置">
-        <a-form
-          :model="redisConfig"
-          :label-col="{ span: 8 }"
-          :wrapper-col="{ span: 16 }"
-        >
-          <a-form-item label="主机地址">
-            <a-input v-model:value="redisConfig.redis_host" placeholder="例如: localhost" />
-          </a-form-item>
-
-          <a-form-item label="端口">
-            <a-input-number v-model:value="redisConfig.redis_port" :min="1" :max="65535" />
-          </a-form-item>
-
-          <a-form-item label="密码">
-            <a-input-password v-model:value="redisConfig.redis_password" placeholder="Redis密码（可选）" />
-          </a-form-item>
-
-          <a-form-item label="数据库">
-            <a-input-number v-model:value="redisConfig.redis_db" :min="0" :max="15" />
-          </a-form-item>
-
-          <a-form-item :wrapper-col="{ offset: 8 }">
-            <a-space>
-              <a-button type="primary" @click="saveRedisConfig" :loading="savingRedis">
-                保存配置
-              </a-button>
-              <a-button @click="loadSystemConfig">
-                重置
-              </a-button>
-            </a-space>
-          </a-form-item>
-        </a-form>
+        <a-alert
+          message="Redis 已内置"
+          description="Redis 运行在 Docker 容器内，App 自动连接 redis://redis:6379，无需手动配置。如需从宿主机访问，可在 .env 文件中修改 REDIS_PORT。"
+          type="info"
+          show-icon
+          style="margin-bottom: 16px;"
+        />
+        
+        <a-descriptions bordered :column="1">
+          <a-descriptions-item label="连接地址">
+            <code>redis://redis:6379</code>
+          </a-descriptions-item>
+          <a-descriptions-item label="说明">
+            App 容器通过 Docker 网络直接访问 Redis，使用固定的服务名和端口。
+          </a-descriptions-item>
+        </a-descriptions>
       </a-tab-pane>
 
       <!-- 邮件配置 -->
@@ -255,14 +239,6 @@ const llmConfig = ref({
   model_max_output_tokens: ''
 })
 
-// Redis配置
-const redisConfig = ref({
-  redis_host: 'localhost',
-  redis_port: 6379,
-  redis_password: '',
-  redis_db: 0
-})
-
 // 邮件配置
 const emailConfig = ref({
   smtp_server: '',
@@ -282,7 +258,6 @@ const schedulerConfig = ref({
 // 状态
 const savingCrawler = ref(false)
 const savingLlm = ref(false)
-const savingRedis = ref(false)
 const savingEmail = ref(false)
 const savingScheduler = ref(false)
 const testingEmail = ref(false)
@@ -305,31 +280,6 @@ const loadSystemConfig = async () => {
         // 隐藏API Key的中间部分
         if (llmConfig.value.openai_api_key && llmConfig.value.openai_api_key.length > 10) {
           llmConfig.value.openai_api_key = llmConfig.value.openai_api_key
-        }
-      }
-      
-      // 加载Redis配置
-      if (config.redis) {
-        const redisUrl = config.redis.redis_url || 'redis://localhost:6379'
-        // 解析 Redis URL - 支持有/无数据库号的格式
-        // 格式1: redis://host:port/db
-        // 格式2: redis://host:port
-        // 格式3: redis://:password@host:port/db
-        const match = redisUrl.match(/redis:\/\/(?:(.*):(.*)@)?([^:]+):(\d+)(?:\/(\d+))?/)
-        if (match) {
-          redisConfig.value = {
-            redis_host: match[3],
-            redis_port: parseInt(match[4]),
-            redis_password: match[2] ? '********' : '',
-            redis_db: match[5] ? parseInt(match[5]) : 0
-          }
-        } else {
-          redisConfig.value = {
-            redis_host: 'localhost',
-            redis_port: 6379,
-            redis_password: '',
-            redis_db: 0
-          }
         }
       }
       
@@ -390,42 +340,6 @@ const saveLlmConfig = async () => {
     console.error(error)
   } finally {
     savingLlm.value = false
-  }
-}
-
-// 保存Redis配置
-const saveRedisConfig = async () => {
-  if (!redisConfig.value.redis_host) {
-    message.warning('请输入主机地址')
-    return
-  }
-
-  savingRedis.value = true
-  try {
-    // 构建 Redis URL
-    const { redis_host, redis_port, redis_password, redis_db } = redisConfig.value
-    
-    // 如果有密码，添加到URL中
-    let redisUrl
-    if (redis_password && redis_password !== '********') {
-      redisUrl = `redis://:${redis_password}@${redis_host}:${redis_port}/${redis_db}`
-    } else {
-      redisUrl = `redis://${redis_host}:${redis_port}/${redis_db}`
-    }
-    
-    const res = await systemConfigApi.updateRedisConfig(redisUrl)
-    if (res.status === 'success') {
-      if (res.hot_reload) {
-        message.success(res.message + ' ✨')
-      } else {
-        message.warning(res.message)
-      }
-    }
-  } catch (error) {
-    message.error('保存Redis配置失败')
-    console.error(error)
-  } finally {
-    savingRedis.value = false
   }
 }
 
