@@ -104,7 +104,7 @@ const searchQuery = ref('')
 const searching = ref(false)
 const searchResults = ref([])
 const hasSearched = ref(false)
-const searchMode = ref('semantic') // semantic | exact | hybrid
+const searchMode = ref('hybrid') // semantic | exact | hybrid
 const searchModeOptions = [
   { label: '语义', value: 'semantic' },
   { label: '精确', value: 'exact' },
