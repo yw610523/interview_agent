@@ -16,3 +16,4 @@ openai  # OpenAI API
 langchain  # 大模型框架
 langchain-community  # LangChain 社区包（Firecrawl Loader）
 json-repair  # 用于修复损坏的JSON
+nest-asyncio  # 允许嵌套事件循环

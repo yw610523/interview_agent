@@ -79,6 +79,12 @@ class URLScanner:
             follow_redirects: bool = True,
             verify_ssl: bool = True,
             max_content_length: int = 10 * 1024 * 1024,  # 10MB
+            use_firecrawl: bool = False,
+            firecrawl_api_url: str = "http://localhost:3002",
+            firecrawl_api_key: Optional[str] = None,
+            firecrawl_timeout: int = 60,
+            firecrawl_use_official: bool = False,
+            firecrawl_only_main_content: bool = True,
     ):
         """
         初始化 URL 扫描器。
@@ -88,11 +94,23 @@ class URLScanner:
             follow_redirects: 是否跟随重定向
             verify_ssl: 是否验证 SSL 证书
             max_content_length: 最大下载内容长度
+            use_firecrawl: 是否启用 Firecrawl
+            firecrawl_api_url: Firecrawl API URL
+            firecrawl_api_key: Firecrawl API Key
+            firecrawl_timeout: Firecrawl 超时时间
+            firecrawl_use_official: 是否使用官方 Firecrawl API
+            firecrawl_only_main_content: 是否只提取主要内容
         """
         self.timeout = timeout
         self.follow_redirects = follow_redirects
         self.verify_ssl = verify_ssl
         self.max_content_length = max_content_length
+        self.use_firecrawl = use_firecrawl
+        self.firecrawl_api_url = firecrawl_api_url
+        self.firecrawl_api_key = firecrawl_api_key
+        self.firecrawl_timeout = firecrawl_timeout
+        self.firecrawl_use_official = firecrawl_use_official
+        self.firecrawl_only_main_content = firecrawl_only_main_content
         self._session = requests.Session()
         self._session.headers.update(self.DEFAULT_HEADERS)
 
@@ -112,6 +130,30 @@ class URLScanner:
         start_time = time.time()
 
         try:
+            # 如果启用了 Firecrawl，优先使用 Firecrawl
+            logger.info(f"URLScanner配置: use_firecrawl={self.use_firecrawl}, firecrawl_api_url={self.firecrawl_api_url}")
+            if self.use_firecrawl:
+                logger.info(f"使用 Firecrawl 爬取页面: {url}")
+                firecrawl_result = self._scan_with_firecrawl(url)
+                
+                if firecrawl_result.success:
+                    logger.info(f"Firecrawl 爬取成功: {firecrawl_result.title}")
+                    result.status_code = 200
+                    result.title = firecrawl_result.title
+                    result.html_content = firecrawl_result.html or ""
+                    result.text_content = firecrawl_result.markdown or ""
+                    result.word_count = len(result.text_content.split())
+                    result.content_type = firecrawl_result.content_type or "text/html"
+                    result.load_time = time.time() - start_time
+                    
+                    # 解析 HTML 内容
+                    if result.html_content:
+                        self._parse_html(url, result.html_content, result)
+                    
+                    return result
+                else:
+                    logger.warning(f"Firecrawl 爬取失败: {firecrawl_result.error}，降级使用传统爬虫")
+            
             # 检测是否为微信公众号文章（需要 JavaScript 渲染）
             is_wechat = "weixin.qq.com" in url or "mp.weixin.qq.com" in url
             if is_wechat:
@@ -326,6 +368,54 @@ class URLScanner:
         # 6. 如果都没有，返回 None
         logger.warning(f"无法从页面提取标题: {url}")
         return None
+
+    def _scan_with_firecrawl(self, url: str) -> 'FirecrawlResult':
+        """
+        使用 Firecrawl 爬取页面（支持 JavaScript 渲染）。
+
+        参数:
+            url: 要爬取的 URL
+
+        返回:
+            FirecrawlResult 对象
+        """
+        import asyncio
+        from app.services.firecrawl_mcp import FirecrawlMCPService
+        import nest_asyncio
+
+        # 创建 Firecrawl 服务实例
+        firecrawl_service = FirecrawlMCPService(
+            api_url=self.firecrawl_api_url,
+            api_key=self.firecrawl_api_key,
+            timeout=self.firecrawl_timeout,
+            use_official_api=self.firecrawl_use_official,
+        )
+
+        # 定义异步爬取函数
+        async def do_scrape():
+            return await firecrawl_service.scrape_url(
+                url=url,
+                formats=["markdown", "html"],
+                only_main_content=self.firecrawl_only_main_content,
+            )
+
+        try:
+            # 尝试获取当前事件循环
+            try:
+                loop = asyncio.get_running_loop()
+                # 如果已经有运行的循环，使用 nest_asyncio 允许嵌套
+                logger.debug(f"检测到运行中的事件循环，应用 nest_asyncio")
+                nest_asyncio.apply(loop)
+                # 在当前循环中运行
+                return loop.run_until_complete(do_scrape())
+            except RuntimeError:
+                # 没有运行的循环，创建新的
+                logger.debug("未检测到运行中的事件循环，创建新循环")
+                return asyncio.run(do_scrape())
+        except Exception as e:
+            logger.error(f"Firecrawl 爬取异常: {str(e)}")
+            from app.services.firecrawl_mcp import FirecrawlResult
+            return FirecrawlResult(success=False, error=str(e), url=url)
 
     def scan_batch(self, urls: List[str], callback=None) -> List[ScanResult]:
         """

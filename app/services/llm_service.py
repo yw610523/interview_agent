@@ -402,12 +402,20 @@ class LLMService:
             chunks.append(chunk.strip())
 
             # 计算下一个起始位置（考虑重叠）
-            start = split_pos - overlap
-            if start < 0:
-                start = 0
-
-            # 避免无限循环
-            if start >= content_length or (len(chunks) > 0 and start >= len(chunks[-1])):
+            next_start = split_pos - overlap
+            if next_start < 0:
+                next_start = 0
+            
+            # 避免无限循环：确保next_start至少前进max_length的一半
+            min_advance = max_length // 2
+            if next_start < start + min_advance:
+                next_start = start + min_advance
+            
+            start = next_start
+            
+            # 安全检查：确保不会无限循环
+            if len(chunks) > 100:  # 最多100个chunk
+                logger.warning(f"chunk数量过多({len(chunks)})，停止分割")
                 break
 
         return chunks
@@ -451,7 +459,8 @@ class LLMService:
             chunks = [content]
         else:
             chunks = self._split_content_by_semantics(content, max_length=max_content_length, overlap=200)
-            logger.info(f"页面 {url} 内容过长，分割为 {len(chunks)} 个chunk")
+            logger.info(f"页面 {url} 内容过长({len(content)}字符)，分割为 {len(chunks)} 个chunk")
+            logger.info(f"各chunk长度: {[len(c) for c in chunks]}")
 
         if self.client is None:
             logger.error("大模型客户端未初始化，无法处理页面")
@@ -461,6 +470,7 @@ class LLMService:
         max_retries = int(os.getenv("LLM_RETRY_COUNT", 3))
 
         for chunk_idx, chunk_content in enumerate(chunks):
+            logger.info(f"开始处理 chunk {chunk_idx + 1}/{len(chunks)} (长度: {len(chunk_content)}字符)")
             # 构建单chunk的提示词
             prompt = f"""### 网页信息
 URL: {url}
@@ -532,9 +542,13 @@ URL: {url}
 
             all_questions.extend(questions)
             if retry_count > 0:
-                logger.info(f"chunk {chunk_idx + 1} 识别出 {len(questions)} 个问题（经过 {retry_count} 次重试）")
+                logger.info(f"chunk {chunk_idx + 1}/{len(chunks)} 识别出 {len(questions)} 个问题（经过 {retry_count} 次重试）")
             else:
-                logger.info(f"chunk {chunk_idx + 1} 识别出 {len(questions)} 个问题")
+                logger.info(f"chunk {chunk_idx + 1}/{len(chunks)} 识别出 {len(questions)} 个问题")
+            
+            # 每处理10个chunk输出一次进度
+            if (chunk_idx + 1) % 10 == 0:
+                logger.info(f"已处理 {chunk_idx + 1}/{len(chunks)} 个chunk，累计识别 {len(all_questions)} 个问题")
 
         return all_questions
 

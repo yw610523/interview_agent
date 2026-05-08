@@ -1,5 +1,5 @@
 {
-  "sitemap_url": "javaguide.cn",
+  "sitemap_url": "docs.yys2024.cn",
   "sitemap_path": "/sitemap.xml",
   "timeout": 30,
   "max_urls": null,
@@ -14,7 +14,7 @@
   "save_results": true,
   "verbose": true,
   "url_include_patterns": [
-    "/system-design/security/jwt-intro.html"
+    "面试/SpringCloud.html"
   ],
   "url_exclude_patterns": []
 }

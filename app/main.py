@@ -130,6 +130,15 @@ def run_crawler() -> Dict[str, Any]:
         else:
             config = get_config_from_env()
 
+        # 从环境变量覆盖 Firecrawl 配置（确保最新配置生效）
+        env_config = get_config_from_env()
+        config.use_firecrawl = env_config.use_firecrawl
+        config.firecrawl_api_url = env_config.firecrawl_api_url
+        config.firecrawl_api_key = env_config.firecrawl_api_key
+        config.firecrawl_timeout = env_config.firecrawl_timeout
+        config.firecrawl_use_official = env_config.firecrawl_use_official
+        config.firecrawl_only_main_content = env_config.firecrawl_only_main_content
+
         if not config.sitemap_url:
             logger.error("配置错误：未指定 Sitemap URL")
             return {"status": "error", "message": "未指定 Sitemap URL"}
@@ -283,9 +292,19 @@ async def trigger_crawl_async():
                 DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
 
                 if DEFAULT_CONFIG_PATH.exists():
+                    logger.info(f"使用默认配置文件: {DEFAULT_CONFIG_PATH}")
                     config = CrawlerConfig.from_json(str(DEFAULT_CONFIG_PATH))
                 else:
                     config = get_config_from_env()
+
+                # 从环境变量覆盖 Firecrawl 配置（确保最新配置生效）
+                env_config = get_config_from_env()
+                config.use_firecrawl = env_config.use_firecrawl
+                config.firecrawl_api_url = env_config.firecrawl_api_url
+                config.firecrawl_api_key = env_config.firecrawl_api_key
+                config.firecrawl_timeout = env_config.firecrawl_timeout
+                config.firecrawl_use_official = env_config.firecrawl_use_official
+                config.firecrawl_only_main_content = env_config.firecrawl_only_main_content
 
                 if not config.sitemap_url:
                     raise ValueError("未指定 Sitemap URL")
@@ -1269,7 +1288,23 @@ async def crawl_single_page(url: str):
 
         # 1. 扫描页面
         logger.info("步骤1: 正在扫描页面...")
-        scanner = URLScanner()
+        
+        # 从配置中读取 Firecrawl 设置
+        from app.config.crawler_config import get_config_from_env
+        crawler_config = get_config_from_env()
+        
+        scanner = URLScanner(
+            timeout=crawler_config.timeout,
+            follow_redirects=crawler_config.follow_redirects,
+            verify_ssl=crawler_config.verify_ssl,
+            max_content_length=crawler_config.max_content_length,
+            use_firecrawl=crawler_config.use_firecrawl,
+            firecrawl_api_url=crawler_config.firecrawl_api_url,
+            firecrawl_api_key=crawler_config.firecrawl_api_key,
+            firecrawl_timeout=crawler_config.firecrawl_timeout,
+            firecrawl_use_official=crawler_config.firecrawl_use_official,
+            firecrawl_only_main_content=crawler_config.firecrawl_only_main_content,
+        )
         scan_result = scanner.scan(url)
 
         if scan_result.error:
@@ -1393,7 +1428,21 @@ async def crawl_single_page_stream(url: str):
                     log_callback("正在扫描页面...", 10, "scanning")
 
                     # 1. 扫描页面
-                    scanner = URLScanner()
+                    from app.config.crawler_config import get_config_from_env
+                    crawler_config = get_config_from_env()
+                    
+                    scanner = URLScanner(
+                        timeout=crawler_config.timeout,
+                        follow_redirects=crawler_config.follow_redirects,
+                        verify_ssl=crawler_config.verify_ssl,
+                        max_content_length=crawler_config.max_content_length,
+                        use_firecrawl=crawler_config.use_firecrawl,
+                        firecrawl_api_url=crawler_config.firecrawl_api_url,
+                        firecrawl_api_key=crawler_config.firecrawl_api_key,
+                        firecrawl_timeout=crawler_config.firecrawl_timeout,
+                        firecrawl_use_official=crawler_config.firecrawl_use_official,
+                        firecrawl_only_main_content=crawler_config.firecrawl_only_main_content,
+                    )
                     scan_result = scanner.scan(url)
 
                     if scan_result.error:

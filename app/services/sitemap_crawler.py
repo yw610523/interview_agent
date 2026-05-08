@@ -281,6 +281,12 @@ class SitemapCrawler:
             follow_redirects=self.config.follow_redirects,
             verify_ssl=self.config.verify_ssl,
             max_content_length=self.config.max_content_length,
+            use_firecrawl=self.config.use_firecrawl,
+            firecrawl_api_url=self.config.firecrawl_api_url,
+            firecrawl_api_key=self.config.firecrawl_api_key,
+            firecrawl_timeout=self.config.firecrawl_timeout,
+            firecrawl_use_official=self.config.firecrawl_use_official,
+            firecrawl_only_main_content=self.config.firecrawl_only_main_content,
         )
 
         # Check robots.txt first
@@ -340,12 +346,8 @@ class SitemapCrawler:
             if self.config.verbose:
                 logger.info(f"Scanning URL {i + 1}/{len(urls)}: {url}")
 
-            # Use Firecrawl if enabled and available, otherwise use traditional scanner
-            if self._firecrawl_service:
-                import asyncio
-                result = asyncio.run(self._scan_with_firecrawl(url))
-            else:
-                result = self._url_scanner.scan(url)
+            # Use URLScanner (which internally uses Firecrawl if enabled)
+            result = self._url_scanner.scan(url)
 
             self._results.append(result)
 
@@ -409,6 +411,12 @@ class SitemapCrawler:
             follow_redirects=self.config.follow_redirects,
             verify_ssl=self.config.verify_ssl,
             max_content_length=self.config.max_content_length,
+            use_firecrawl=self.config.use_firecrawl,
+            firecrawl_api_url=self.config.firecrawl_api_url,
+            firecrawl_api_key=self.config.firecrawl_api_key,
+            firecrawl_timeout=self.config.firecrawl_timeout,
+            firecrawl_use_official=self.config.firecrawl_use_official,
+            firecrawl_only_main_content=self.config.firecrawl_only_main_content,
         )
 
         for i, url in enumerate(urls):
@@ -419,12 +427,8 @@ class SitemapCrawler:
 
             logger.info(f"Scanning URL {i + 1}/{len(urls)}: {url}")
 
-            # Use Firecrawl if enabled and available, otherwise use traditional scanner
-            if self._firecrawl_service:
-                import asyncio
-                result = asyncio.run(self._scan_with_firecrawl(url))
-            else:
-                result = self._url_scanner.scan(url)
+            # Use URLScanner (which internally uses Firecrawl if enabled)
+            result = self._url_scanner.scan(url)
 
             self._results.append(result)
 
