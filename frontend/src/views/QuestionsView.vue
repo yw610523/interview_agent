@@ -3,7 +3,7 @@
     <a-row :gutter="[24, 24]">
       <!-- 生成配置 -->
       <a-col :span="24">
-        <a-card title=" 生成面试题" :bordered="false" class="form-card">
+        <a-card title="🎯 生成面试题" :bordered="false" class="form-card">
           <a-form layout="inline" class="mobile-form">
             <a-form-item label="题目数量">
               <a-input-number 
@@ -21,7 +21,6 @@
                 style="width: 120px;"
                 allow-clear
                 :options="difficultyOptions"
-                @change="handleDifficultyChange"
               />
             </a-form-item>
 
@@ -51,156 +50,140 @@
         </a-card>
       </a-col>
 
-      <!-- 题目列表（桌面端显示） -->
-      <a-col :span="24" class="desktop-results">
+      <!-- 题目列表 -->
+      <a-col :span="24">
         <a-card :bordered="false">
           <template #title>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span>📋 面试题列表 ({{ questions.length }})</span>
-              <a-space>
-                <a-button size="small" @click="expandAll" v-if="questions.length > 0">
-                  展开全部答案
-                </a-button>
-                <a-button size="small" @click="collapseAll" v-if="questions.length > 0">
-                  收起全部答案
-                </a-button>
-              </a-space>
-            </div>
+            <span>📋 面试题列表 ({{ questions.length }})</span>
           </template>
 
           <a-empty v-if="questions.length === 0" description="点击【生成题目】按钮开始生成面试题" />
 
-          <div class="questions-container" v-else>
-            <a-collapse v-model:activeKey="activeKeys" accordion>
-              <a-collapse-panel 
-                v-for="(question, index) in questions" 
-                :key="index.toString()"
-              >
-                <template #header>
-                  <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    <div style="flex: 1;">
-                      <strong style="font-size: 16px;">问题 {{ index + 1 }}: {{ question.title }}</strong>
-                    </div>
-                    <div style="margin-left: 16px;">
-                      <a-tag color="blue">{{ question.difficulty || 'medium' }}</a-tag>
-                      <a-tag v-if="question.category" color="green">{{ question.category }}</a-tag>
-                      <a-tag v-for="tag in (question.tags || [])" :key="tag" color="purple">
-                        {{ tag }}
-                      </a-tag>
-                    </div>
-                  </div>
-                </template>
-
-                <div class="answer-content">
-                  <MarkdownRenderer :content="question.answer" />
-                  
-                  <a-divider />
-                  
-                  <div class="question-meta">
-                    <a-space direction="vertical" size="small">
-                      <div>
-                        <strong>来源:</strong> 
-                        <a :href="question.source_url" target="_blank">
-                          {{ question.source_url }}
-                        </a>
+          <div v-else class="questions-list">
+            <a-list
+              :data-source="questions"
+              :pagination="{
+                pageSize: 20,
+                showSizeChanger: true,
+                showTotal: (total) => `共 ${total} 道题目`
+              }"
+            >
+              <template #renderItem="{ item, index }">
+                <a-list-item class="question-item" @click="showQuestionDetail(index)">
+                  <a-list-item-meta>
+                    <template #title>
+                      <div class="question-title">{{ item.title }}</div>
+                    </template>
+                    <template #description>
+                      <div class="question-tags">
+                        <a-tag color="blue">{{ item.difficulty || 'medium' }}</a-tag>
+                        <a-tag v-if="item.category" color="green">{{ item.category }}</a-tag>
+                        <a-tag v-for="tag in (item.tags || [])" :key="tag" color="purple">
+                          {{ tag }}
+                        </a-tag>
                       </div>
-                      <div v-if="question.importance_score">
-                        <strong>重要性评分:</strong> 
-                        <a-progress 
-                          :percent="Math.round(question.importance_score * 100)" 
-                          :stroke-color="{
-                            '0%': '#108ee9',
-                            '100%': '#87d068',
-                          }"
-                          style="width: 200px; display: inline-block; margin-left: 8px;"
-                        />
-                      </div>
-                    </a-space>
-                  </div>
-                </div>
-              </a-collapse-panel>
-            </a-collapse>
+                    </template>
+                  </a-list-item-meta>
+                  <template #actions>
+                    <a-button type="link" size="small">查看详情 →</a-button>
+                  </template>
+                </a-list-item>
+              </template>
+            </a-list>
           </div>
         </a-card>
       </a-col>
     </a-row>
 
-    <!-- 移动端结果模态框 -->
+    <!-- 题目详情模态框 -->
     <a-modal
-      v-model:open="showResultsModal"
-      title=" 面试题列表"
+      v-model:open="detailModalVisible"
+      :title="currentQuestion ? `问题 ${currentIndex + 1}: ${currentQuestion.title}` : ''"
       :footer="null"
-      width="90%"
-      :body-style="{ maxHeight: '70vh', overflowY: 'auto', padding: '16px' }"
-      class="mobile-results-modal"
+      :width="modalWidth"
+      :body-style="{ padding: '24px', maxHeight: modalMaxHeight, overflowY: 'auto' }"
+      :class="['question-detail-modal', { 'fullscreen': isFullscreen }]"
+      @cancel="closeModal"
+      wrap-class-name="draggable-modal"
+      v-draggable
     >
-      <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-        <span style="color: #666;">共 {{ questions.length }} 道题目</span>
-        <a-space>
-          <a-button size="small" @click="expandAll">
-            展开全部
-          </a-button>
-          <a-button size="small" @click="collapseAll">
-            收起全部
-          </a-button>
-        </a-space>
-      </div>
+      <template #closeIcon>
+        <a-button type="text" size="small" @click="closeModal">
+          <template #icon><CloseOutlined /></template>
+        </a-button>
+      </template>
 
-      <a-collapse v-model:activeKey="activeKeys" accordion>
-        <a-collapse-panel 
-          v-for="(question, index) in questions" 
-          :key="index.toString()"
-        >
-          <template #header>
-            <div style="width: 100%;">
-              <strong>问题 {{ index + 1 }}: {{ question.title }}</strong>
-              <div style="margin-top: 8px;">
-                <a-tag color="blue" size="small">{{ question.difficulty || 'medium' }}</a-tag>
-                <a-tag v-if="question.category" color="green" size="small">{{ question.category }}</a-tag>
-                <a-tag v-for="tag in (question.tags || [])" :key="tag" color="purple" size="small">
-                  {{ tag }}
-                </a-tag>
-              </div>
-            </div>
-          </template>
-
-          <div class="answer-content">
-            <MarkdownRenderer :content="question.answer" />
-            
-            <a-divider />
-            
-            <div class="question-meta">
-              <a-space direction="vertical" size="small">
-                <div>
-                  <strong>来源:</strong> 
-                  <a :href="question.source_url" target="_blank">
-                    {{ question.source_url }}
-                  </a>
-                </div>
-                <div v-if="question.importance_score">
-                  <strong>重要性评分:</strong> 
-                  <a-progress 
-                    :percent="Math.round(question.importance_score * 100)" 
-                    :stroke-color="{
-                      '0%': '#108ee9',
-                      '100%': '#87d068',
-                    }"
-                    style="width: 100%; margin-top: 8px;"
-                  />
-                </div>
-              </a-space>
-            </div>
+      <template #title>
+        <div class="modal-header">
+          <span class="modal-title">
+            问题 {{ currentIndex + 1 }}: {{ currentQuestion?.title }}
+          </span>
+          <div class="modal-actions">
+            <a-tooltip :title="isFullscreen ? '退出全屏' : '全屏'">
+              <a-button type="text" size="small" @click="toggleFullscreen">
+                <template #icon>
+                  <FullscreenExitOutlined v-if="isFullscreen" />
+                  <FullscreenOutlined v-else />
+                </template>
+              </a-button>
+            </a-tooltip>
+            <a-tooltip title="关闭">
+              <a-button type="text" size="small" @click="closeModal">
+                <template #icon><CloseOutlined /></template>
+              </a-button>
+            </a-tooltip>
           </div>
-        </a-collapse-panel>
-      </a-collapse>
+        </div>
+      </template>
+
+      <div v-if="currentQuestion" class="question-detail-content" ref="modalContentRef">
+        <div class="answer-section">
+          <h4>答案</h4>
+          <MarkdownRenderer :content="currentQuestion.answer" />
+        </div>
+        
+        <a-divider />
+        
+        <div class="meta-section">
+          <a-descriptions bordered :column="1" size="small">
+            <a-descriptions-item label="难度">
+              <a-tag color="blue">{{ currentQuestion.difficulty || 'medium' }}</a-tag>
+            </a-descriptions-item>
+            <a-descriptions-item v-if="currentQuestion.category" label="分类">
+              <a-tag color="green">{{ currentQuestion.category }}</a-tag>
+            </a-descriptions-item>
+            <a-descriptions-item v-if="currentQuestion.tags && currentQuestion.tags.length > 0" label="标签">
+              <a-tag v-for="tag in currentQuestion.tags" :key="tag" color="purple">
+                {{ tag }}
+              </a-tag>
+            </a-descriptions-item>
+            <a-descriptions-item v-if="currentQuestion.source_url" label="来源">
+              <a :href="currentQuestion.source_url" target="_blank">
+                {{ currentQuestion.source_url }}
+              </a>
+            </a-descriptions-item>
+            <a-descriptions-item v-if="currentQuestion.importance_score" label="重要性评分">
+              <a-progress 
+                :percent="Math.round(currentQuestion.importance_score * 100)" 
+                :stroke-color="{
+                  '0%': '#108ee9',
+                  '100%': '#87d068',
+                }"
+                style="width: 200px;"
+              />
+            </a-descriptions-item>
+          </a-descriptions>
+        </div>
+      </div>
     </a-modal>
   </div>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { questionApi } from '../services'
 import { message } from 'ant-design-vue'
+import { CloseOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons-vue'
 import MarkdownRenderer from '../components/MarkdownRenderer.vue'
 
 // 生成配置
@@ -219,13 +202,18 @@ const difficultyOptions = [
 // 状态
 const generating = ref(false)
 const questions = ref([])
-const activeKeys = ref([])
-const showResultsModal = ref(false)
+
+// 模态框相关
+const detailModalVisible = ref(false)
+const currentQuestion = ref(null)
+const currentIndex = ref(0)
+const isFullscreen = ref(false)
+const modalWidth = ref(800)
+const modalMaxHeight = ref('70vh')
 
 // 生成面试题
 const generateQuestions = async () => {
   generating.value = true
-  activeKeys.value = []
   
   try {
     const res = await questionApi.generateBatch(
@@ -239,11 +227,6 @@ const generateQuestions = async () => {
       questions.value = res.questions
       message.success(`成功生成 ${res.count} 道面试题`)
       
-      // 在移动端打开模态框
-      if (window.innerWidth <= 768 && res.count > 0) {
-        showResultsModal.value = true
-      }
-      
       if (res.count === 0) {
         message.warning('没有找到符合条件的题目，请调整筛选条件')
       }
@@ -256,26 +239,49 @@ const generateQuestions = async () => {
   }
 }
 
-// 难度选择变化处理
-const handleDifficultyChange = (value) => {
-  console.log('难度选择变化:', value)
-  console.log('当前difficulty值:', difficulty.value)
+// 显示题目详情
+const showQuestionDetail = (index) => {
+  currentIndex.value = index
+  currentQuestion.value = questions.value[index]
+  detailModalVisible.value = true
+  isFullscreen.value = false
+  modalWidth.value = 800
 }
 
-// 监听difficulty变化
-watch(difficulty, (newVal, oldVal) => {
-  console.log('difficulty从', oldVal, '变为', newVal)
+// 关闭模态框
+const closeModal = () => {
+  detailModalVisible.value = false
+  currentQuestion.value = null
+  isFullscreen.value = false
+}
+
+// 切换全屏
+const toggleFullscreen = () => {
+  isFullscreen.value = !isFullscreen.value
+  if (isFullscreen.value) {
+    modalWidth.value = window.innerWidth
+    modalMaxHeight.value = 'calc(100vh - 110px)'
+  } else {
+    modalWidth.value = 800
+    modalMaxHeight.value = '70vh'
+  }
+}
+
+// ESC 键关闭模态框
+const handleEscKey = (e) => {
+  if (e.key === 'Escape' && detailModalVisible.value) {
+    closeModal()
+  }
+}
+
+// 生命周期钩子
+onMounted(() => {
+  document.addEventListener('keydown', handleEscKey)
 })
 
-// 展开所有答案
-const expandAll = () => {
-  activeKeys.value = questions.value.map((_, index) => index.toString())
-}
-
-// 收起所有答案
-const collapseAll = () => {
-  activeKeys.value = []
-}
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleEscKey)
+})
 </script>
 
 <style scoped>
@@ -288,10 +294,6 @@ const collapseAll = () => {
 @media (max-width: 768px) {
   .questions-view {
     padding: 8px;
-  }
-  
-  .desktop-results {
-    display: none;
   }
   
   .mobile-form {
@@ -315,53 +317,71 @@ const collapseAll = () => {
   }
 }
 
-.answer-content {
+/* 题目列表样式 */
+.questions-list {
+  min-height: 200px;
+}
+
+.question-item {
+  cursor: pointer;
+  transition: all 0.3s;
+  border-bottom: 1px solid #f0f0f0;
+  padding: 12px 16px;
+}
+
+.question-item:hover {
+  background-color: #fafafa;
+  transform: translateX(4px);
+}
+
+.question-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: #262626;
+  margin-bottom: 8px;
+}
+
+.question-tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 模态框样式 */
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 500;
+  flex: 1;
+  margin-right: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.question-detail-content {
   padding: 8px 0;
 }
 
-.question-meta {
+.answer-section h4 {
+  margin-bottom: 16px;
+  color: #262626;
+  font-size: 16px;
+}
+
+.meta-section {
   margin-top: 16px;
-  font-size: 14px;
-  color: #666;
-}
-
-.question-meta a {
-  word-break: break-all;
-}
-
-/* 题目列表容器 - 添加滚动条 */
-.questions-container {
-  max-height: calc(100vh - 400px);
-  overflow-y: auto;
-  padding-right: 8px;
-  padding-bottom: 20px;
-}
-
-/* 自定义滚动条样式 */
-.questions-container::-webkit-scrollbar {
-  width: 8px;
-}
-
-.questions-container::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 4px;
-}
-
-.questions-container::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 4px;
-}
-
-.questions-container::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
-}
-
-:deep(.ant-collapse-header) {
-  background-color: #fafafa;
-}
-
-:deep(.ant-collapse-content-box) {
-  background-color: #fff;
 }
 
 /* 确保下拉菜单不被遮挡 */
@@ -369,22 +389,42 @@ const collapseAll = () => {
   z-index: 9999 !important;
 }
 
-/* 移动端模态框样式 */
-:deep(.mobile-results-modal .ant-modal) {
-  top: 20px;
-  max-width: 100%;
+/* 模态框全屏样式 */
+:deep(.question-detail-modal.fullscreen .ant-modal) {
+  top: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  max-width: 100vw !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
-:deep(.mobile-results-modal .ant-modal-content) {
-  border-radius: 12px;
+:deep(.question-detail-modal.fullscreen .ant-modal-content) {
+  height: 100vh !important;
+  display: flex;
+  flex-direction: column;
+  border-radius: 0 !important;
 }
 
-:deep(.mobile-results-modal .ant-modal-header) {
-  border-radius: 12px 12px 0 0;
-  padding: 16px 20px;
+:deep(.question-detail-modal.fullscreen .ant-modal-body) {
+  flex: 1;
+  overflow-y: auto !important;
 }
 
-:deep(.mobile-results-modal .ant-modal-body) {
-  padding: 0;
+/* 可拖拽模态框 */
+:deep(.draggable-modal .ant-modal) {
+  cursor: move;
+}
+
+:deep(.draggable-modal .ant-modal-header) {
+  cursor: move;
+  user-select: none;
+}
+
+:deep(.draggable-modal .ant-modal-body) {
+  cursor: default;
 }
 </style>
