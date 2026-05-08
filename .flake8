@@ -6,6 +6,7 @@ exclude =
     venv,
     node_modules,
     build,
-    dist
+    dist,
+    submodules
 per-file-ignores =
     tests/*: E501,F541

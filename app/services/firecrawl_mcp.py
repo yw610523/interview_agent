@@ -6,9 +6,7 @@ Firecrawl MCP 集成服务
 """
 
 import logging
-import asyncio
 from typing import Dict, List, Optional, Any
-from urllib.parse import urlparse
 
 import httpx
 from pydantic import BaseModel, Field
@@ -44,7 +42,7 @@ class FirecrawlResult(BaseModel):
 class FirecrawlMCPService:
     """
     Firecrawl MCP 服务集成类
-    
+
     支持两种模式：
     1. 自托管 Firecrawl 服务（Docker）
     2. Firecrawl 官方 API（需要 API Key）
@@ -101,7 +99,7 @@ class FirecrawlMCPService:
 
         try:
             endpoint = f"{self.api_url}/v1/scrape"
-            
+
             # 构建请求 payload
             payload = {
                 "url": url,
@@ -119,7 +117,7 @@ class FirecrawlMCPService:
             headers = {
                 "Content-Type": "application/json",
             }
-            
+
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
 
@@ -127,9 +125,9 @@ class FirecrawlMCPService:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(endpoint, json=payload, headers=headers)
                 response.raise_for_status()
-                
+
                 data = response.json()
-                
+
                 # 解析响应
                 if data.get("success"):
                     result_data = data.get("data", {})
@@ -190,12 +188,12 @@ class FirecrawlMCPService:
         """
         try:
             endpoint = f"{self.api_url}/v1/map"
-            
+
             payload = {
                 "url": url,
                 "limit": limit,
             }
-            
+
             if search:
                 payload["search"] = search
 
@@ -206,7 +204,7 @@ class FirecrawlMCPService:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(endpoint, json=payload, headers=headers)
                 response.raise_for_status()
-                
+
                 data = response.json()
                 return data
 
@@ -217,7 +215,7 @@ class FirecrawlMCPService:
     def is_available(self) -> bool:
         """
         检查 Firecrawl 服务是否可用。
-        
+
         返回:
             bool: 服务是否可用
         """

@@ -17,7 +17,7 @@ from app.config.crawler_config import CrawlerConfig
 from .sitemap_parser import SitemapParser
 from .url_filter import URLFilter
 from .url_scanner import URLScanner, ScanResult
-from .firecrawl_mcp import FirecrawlMCPService, FirecrawlResult
+from .firecrawl_mcp import FirecrawlMCPService
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ class SitemapCrawler:
         """
         if not self.config.use_firecrawl:
             return
-        
+
         try:
             firecrawl_config = {
                 "firecrawl_api_url": self.config.firecrawl_api_url,
@@ -85,7 +85,7 @@ class SitemapCrawler:
                 "firecrawl_use_official": self.config.firecrawl_use_official,
             }
             self._firecrawl_service = FirecrawlMCPService.from_config(firecrawl_config)
-            
+
             # 检查服务是否可用
             if self._firecrawl_service.is_available():
                 logger.info("Firecrawl MCP 服务已连接")
@@ -346,7 +346,7 @@ class SitemapCrawler:
                 result = asyncio.run(self._scan_with_firecrawl(url))
             else:
                 result = self._url_scanner.scan(url)
-            
+
             self._results.append(result)
 
             if result.error:
@@ -418,14 +418,14 @@ class SitemapCrawler:
                 break
 
             logger.info(f"Scanning URL {i + 1}/{len(urls)}: {url}")
-            
+
             # Use Firecrawl if enabled and available, otherwise use traditional scanner
             if self._firecrawl_service:
                 import asyncio
                 result = asyncio.run(self._scan_with_firecrawl(url))
             else:
                 result = self._url_scanner.scan(url)
-            
+
             self._results.append(result)
 
             if result.error:

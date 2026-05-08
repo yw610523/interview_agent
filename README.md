@@ -43,11 +43,6 @@ docker compose -f deploy/docker-compose.yml up -d
 - **API 文档**: http://localhost/docs
 - **Redis Insight**（数据管理）: http://localhost:8001
 
-> **使用外置 Redis**：如果需要连接外部 Redis 服务器，请：
-> 1. 在 `.env` 中设置 `REDIS_URL=redis://[:password@]host:port`
-> 2. 在 `deploy/docker-compose.yml` 中注释掉 `redis` 服务块和 `depends_on` 配置
-> 3. 重新启动：`docker compose -f deploy/docker-compose.yml up -d`
-
 ### 手动部署（开发环境）
 
 #### 环境要求
@@ -96,7 +91,7 @@ cp .env.template .env
 | `OPENAI_API_BASE`            | 否     | API 地址(默认 `https://api.openai.com/v1`)                                               |
 | `OPENAI_MODEL`               | 否     | 模型名(默认 `gpt-4o-mini`,也兼容 Qwen/DeepSeek 等)                                            |
 | `SITEMAP_URL`                | 否     | 目标站点域名或 Sitemap URL(默认 `javaguide.cn`)                                               |
-| `REDIS_URL`                  | 否     | Redis 连接地址（内置 Redis: `redis://redis:6379`，外置 Redis: `redis://[:password@]host:port`） |
+| `REDIS_URL`                  | 否     | Redis 连接地址（默认 `redis://redis:6379`）                                                  |
 | `SMTP_USER`, `SMTP_PASSWORD` | 否     | 邮件服务配置(如需要发送邮件功能)                                                                    |
 | `APP_PORT`                   | 否     | 前端访问端口（默认 `9023`）                                                                    |
 | `REDIS_PORT`                 | 否     | Redis 端口（默认 `6379`）                                                                  |

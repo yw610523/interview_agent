@@ -2,7 +2,6 @@ version: '3.8'
 
 services:
   # Redis 服务（向量数据库）
-  # 如果使用外置 Redis，请注释掉整个 redis 服务块
   redis:
     image: redis/redis-stack:latest
     container_name: interview-redis
@@ -17,22 +16,6 @@ services:
       - interview-network
     restart: unless-stopped
 
-  # Firecrawl MCP 服务（用于动态网页渲染和解析）
-  firecrawl:
-    image: mendable/firecrawl:latest
-    container_name: firecrawl-mcp
-    ports:
-      - "${FIRECRAWL_PORT:-3102}:3002"
-    environment:
-      - PORT=3002
-      - NUM_WORKERS=${FIRECRAWL_WORKERS:-4}
-    networks:
-      - interview-network
-    restart: unless-stopped
-    # 如果需要代理支持，取消下面的注释并配置你的代理
-    # environment:
-    #   - ALL_PROXY=http://192.168.1.1:7890
-
   # Interview Agent 应用
   app:
     image: ghcr.io/yw610523/interview_agent:latest
@@ -41,7 +24,6 @@ services:
       - "${APP_PORT:-9023}:9023"  # 前端访问端口
     env_file:
       - ../.env
-    # 如果使用外置 Redis，请注释掉下面这行
     depends_on:
       - redis
     networks:
