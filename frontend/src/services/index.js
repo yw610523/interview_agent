@@ -68,11 +68,6 @@ export const systemConfigApi = {
     return apiClient.put('/llm-config', config)
   },
 
-  // 更新Redis配置
-  updateRedisConfig(redisUrl) {
-    return apiClient.put('/redis-config', { redis_url: redisUrl })
-  },
-
   // 更新邮件配置
   updateEmailConfig(config) {
     return apiClient.put('/email-config', config)

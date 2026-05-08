@@ -1447,34 +1447,8 @@ async def update_llm_config(config_data: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/api/redis-config", summary="更新Redis配置")
-async def update_redis_config(redis_url: str):
-    """
-    更新Redis配置（支持热加载，无需重启）
-    """
-    try:
-        from dotenv import set_key, find_dotenv
-
-        # 加载环境变量
-        dotenv_path = find_dotenv()
-        if not dotenv_path:
-            dotenv_path = '.env'
-
-        # 更新REDIS_URL
-        set_key(dotenv_path, 'REDIS_URL', redis_url)
-
-        # 热加载配置
-        reload_success = config_reload_manager.reload_redis_config()
-
-        return {
-            "status": "success",
-            "message": "Redis配置已更新" + ("（已热加载，立即生效）" if reload_success else "（请重启服务使配置生效）"),
-            "hot_reload": reload_success,
-            "config": {"redis_url": redis_url}
-        }
-    except Exception as e:
-        logger.error(f"更新Redis配置失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+# Redis配置API已移除 - Redis运行在Docker容器内，使用固定的 redis://redis:6379
+# 如需从宿主机访问，可在 .env 中修改 REDIS_PORT
 
 
 @app.put("/api/email-config", summary="更新邮件配置")
@@ -1591,9 +1565,10 @@ async def get_system_config():
             "model_max_output_tokens": os.getenv("MODEL_MAX_OUTPUT_TOKENS", ""),
         }
 
-        # Redis配置
+        # Redis配置（固定值）
         redis_config = {
-            "redis_url": os.getenv("REDIS_URL", "redis://localhost:6379"),
+            "redis_url": "redis://redis:6379",
+            "description": "Redis运行在Docker容器内，App自动连接"
         }
 
         # 邮件配置
