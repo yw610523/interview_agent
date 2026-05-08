@@ -128,12 +128,18 @@ if [ ! -f "$MANAGE_SCRIPT" ]; then
     exit 1
 fi
 
-# 使用 manage 脚本构建和启动（步骤 2 已初始化子模块）
+# 切换到项目根目录再执行 firecrawl-manage.sh（确保子模块路径正确）
+cd "$PROJECT_DIR"
+
+# 使用 manage 脚本构建和启动
 log_info "使用 firecrawl-manage.sh 构建 Firecrawl..."
 bash "$MANAGE_SCRIPT" build
 
 log_info "启动 Firecrawl 服务..."
 bash "$MANAGE_SCRIPT" start
+
+# 返回 deploy 目录
+cd "$SCRIPT_DIR"
 
 log_info "✅ Firecrawl 部署完成"
 
