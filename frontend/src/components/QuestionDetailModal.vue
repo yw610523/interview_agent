@@ -77,6 +77,17 @@
           </a-descriptions-item>
         </a-descriptions>
       </div>
+      
+      <!-- 缩放手柄 -->
+      <div 
+        v-if="!isFullscreen" 
+        class="resize-handle"
+        @mousedown="startResize"
+      >
+        <svg viewBox="0 0 10 10" width="10" height="10">
+          <path d="M 10 0 L 10 10 L 0 10" stroke="#999" stroke-width="1.5" fill="none"/>
+        </svg>
+      </div>
     </div>
   </a-modal>
 </template>
@@ -107,6 +118,13 @@ const visible = ref(false)
 const isFullscreen = ref(false)
 const modalWidth = ref(800)
 const modalMaxHeight = ref('70vh')
+
+// 缩放相关
+let isResizing = false
+let startX = 0
+let startY = 0
+let startWidth = 0
+let startHeight = 0
 
 // 监听外部传入的 visible
 watch(() => props.modelValue, (newVal) => {
@@ -147,12 +165,53 @@ const handleEscKey = (e) => {
   }
 }
 
+// 开始缩放
+const startResize = (e) => {
+  if (isFullscreen.value) return
+  
+  isResizing = true
+  startX = e.clientX
+  startY = e.clientY
+  
+  const modal = document.querySelector('.question-detail-modal .ant-modal')
+  if (modal) {
+    startWidth = modal.offsetWidth
+    startHeight = modal.offsetHeight
+  }
+  
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+// 缩放中
+const doResize = (e) => {
+  if (!isResizing) return
+  
+  const deltaX = e.clientX - startX
+  const deltaY = e.clientY - startY
+  
+  const newWidth = Math.max(400, startWidth + deltaX)
+  const newHeight = Math.max(300, startHeight + deltaY)
+  
+  modalWidth.value = newWidth
+  modalMaxHeight.value = `${newHeight}px`
+}
+
+// 结束缩放
+const stopResize = () => {
+  isResizing = false
+}
+
 onMounted(() => {
   document.addEventListener('keydown', handleEscKey)
+  document.addEventListener('mousemove', doResize)
+  document.addEventListener('mouseup', stopResize)
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscKey)
+  document.removeEventListener('mousemove', doResize)
+  document.removeEventListener('mouseup', stopResize)
 })
 </script>
 
@@ -181,6 +240,8 @@ onUnmounted(() => {
 
 .question-detail-content {
   padding: 8px 0;
+  position: relative;
+  min-height: 200px;
 }
 
 .answer-section h4 {
@@ -191,6 +252,31 @@ onUnmounted(() => {
 
 .meta-section {
   margin-top: 16px;
+}
+
+/* 缩放手柄 */
+.resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 20px;
+  height: 20px;
+  cursor: nwse-resize;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 4px;
+  user-select: none;
+  z-index: 10;
+}
+
+.resize-handle:hover svg path {
+  stroke: #4096ff;
+  stroke-width: 2;
+}
+
+.resize-handle:active svg path {
+  stroke: #1677ff;
 }
 
 /* 模态框全屏样式 */
