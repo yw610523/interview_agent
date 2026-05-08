@@ -19,9 +19,6 @@
             <a-menu-item key="/crawler">
               <router-link to="/crawler">爬虫管理</router-link>
             </a-menu-item>
-            <a-menu-item key="/questions">
-              <router-link to="/questions">面试题生成</router-link>
-            </a-menu-item>
             <a-menu-item key="/favorites">
               <router-link to="/favorites">我的收藏</router-link>
             </a-menu-item>
@@ -53,9 +50,6 @@
             </a-menu-item>
             <a-menu-item key="/crawler">
               <router-link to="/crawler">爬虫管理</router-link>
-            </a-menu-item>
-            <a-menu-item key="/questions">
-              <router-link to="/questions">面试题生成</router-link>
             </a-menu-item>
             <a-menu-item key="/favorites">
               <router-link to="/favorites">我的收藏</router-link>

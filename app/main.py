@@ -603,7 +603,8 @@ async def search_questions(
         tags: Optional[List[str]] = Query(None),
         difficulty: Optional[List[str]] = Query(None),
         category: Optional[List[str]] = Query(None),
-        search_mode: str = Query("semantic", regex="^(semantic|exact|hybrid)$"),
+        search_mode: str = Query("semantic", pattern="^(semantic|exact|hybrid)$"),
+        use_rerank: bool = Query(False, description="是否使用 Rerank 模型重排序搜索结果"),
 ):
     """
     根据关键词搜索面试题
@@ -615,6 +616,7 @@ async def search_questions(
         difficulty: 难度过滤（easy/medium/hard）
         category: 分类过滤
         search_mode: 搜索模式（semantic=语义搜索, exact=精确搜索, hybrid=混合搜索）
+        use_rerank: 是否使用 Rerank 模型对搜索结果进行重排序
     """
     try:
         # 构建过滤条件
@@ -651,6 +653,18 @@ async def search_questions(
 
         else:
             raise HTTPException(status_code=400, detail=f"不支持的搜索模式: {search_mode}")
+
+        # 如果启用 Rerank，对搜索结果进行重排序
+        if use_rerank and results:
+            try:
+                reranked_results = feedback_service.rerank_questions(
+                    query, results, limit
+                )
+                results = reranked_results
+                logger.info(f"Rerank 重排序完成: '{query}' -> {len(results)} 个结果")
+            except Exception as e:
+                logger.warning(f"Rerank 失败，使用原始搜索结果: {str(e)}")
+                # Rerank 失败不影响搜索结果，继续使用原始结果
 
         return SearchResult(query=query, results=results, total=len(results))
 

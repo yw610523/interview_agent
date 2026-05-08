@@ -1,72 +1,90 @@
 <template>
   <div class="home-view">
-    <!-- 搜索区域 -->
-    <div class="search-container">
-      <transition name="fade">
-        <div v-if="!hasSearched" class="hero-image">
-          <svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" style="stop-color:#4096ff;stop-opacity:1" />
-                <stop offset="100%" style="stop-color:#69c0ff;stop-opacity:1" />
-              </linearGradient>
-            </defs>
-            <!-- 搜索图标 -->
-            <circle cx="70" cy="60" r="25" fill="none" stroke="url(#grad1)" stroke-width="3"/>
-            <line x1="88" y1="78" x2="105" y2="95" stroke="url(#grad1)" stroke-width="3" stroke-linecap="round"/>
-            <!-- 装饰元素 -->
-            <circle cx="140" cy="40" r="8" fill="#4096ff" opacity="0.3"/>
-            <circle cx="160" cy="70" r="5" fill="#69c0ff" opacity="0.4"/>
-            <circle cx="130" cy="90" r="6" fill="#4096ff" opacity="0.2"/>
-            <!-- 文档图标 -->
-            <rect x="135" y="30" width="20" height="25" rx="2" fill="none" stroke="#4096ff" stroke-width="2" opacity="0.5"/>
-            <line x1="140" y1="38" x2="150" y2="38" stroke="#4096ff" stroke-width="1.5" opacity="0.5"/>
-            <line x1="140" y1="43" x2="150" y2="43" stroke="#4096ff" stroke-width="1.5" opacity="0.5"/>
-            <line x1="140" y1="48" x2="147" y2="48" stroke="#4096ff" stroke-width="1.5" opacity="0.5"/>
-          </svg>
-        </div>
-      </transition>
-      
-      <a-input
-        v-model:value="searchQuery"
-        placeholder="搜索面试题..."
-        size="large"
-        allow-clear
-        @keyup.enter="handleSearch"
-        class="search-input"
-      >
-        <template #prefix>
-          <SearchOutlined />
-        </template>
-        <template #suffix>
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <a-segmented
-              v-model:value="searchMode"
-              :options="searchModeOptions"
-              size="small"
-              style="margin-right: 8px;"
-            />
-            <a-button type="primary" @click="handleSearch" :loading="searching">
-              搜索
+    <!-- 顶部功能区 -->
+    <div class="top-section">
+      <!-- 智能推荐配置 -->
+      <a-card :bordered="false" class="recommend-card">
+        <a-space direction="vertical" style="width: 100%;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 16px;">
+              <span style="font-weight: 500;">🎯 智能推荐</span>
+              <a-input-number 
+                v-model:value="recommendCount" 
+                :min="1" 
+                :max="50"
+                size="small"
+                style="width: 100px;"
+                addon-before="数量"
+              />
+              <a-tooltip title="启用 Rerank 模型进行智能重排序">
+                <a-switch v-model:checked="useRerank" size="small">
+                  <template #checkedChildren>🚀</template>
+                  <template #unCheckedChildren>⚡</template>
+                </a-switch>
+              </a-tooltip>
+              <span style="font-size: 12px; color: #8c8c8c;">
+                {{ useRerank ? '已启用 Rerank' : '未启用 Rerank' }}
+              </span>
+            </div>
+            <a-button type="primary" @click="loadRecommendedQuestions" :loading="loadingRecommend">
+              🎯 获取推荐
             </a-button>
           </div>
-        </template>
-      </a-input>
+          <div style="font-size: 12px; color: #8c8c8c; line-height: 1.5;">
+            💡 基于掌握程度和艾宾浩斯遗忘曲线智能推荐，优先展示未掌握且重要的题目
+            <span v-if="useRerank" style="color: #1890ff;"> | 🚀 Rerank 模型同时用于搜索重排序</span>
+          </div>
+        </a-space>
+      </a-card>
+
+      <!-- 搜索框 -->
+      <div class="search-container">
+        <a-input
+          v-model:value="searchQuery"
+          placeholder="搜索面试题..."
+          size="large"
+          allow-clear
+          @keyup.enter="handleSearch"
+          class="search-input"
+        >
+          <template #prefix>
+            <SearchOutlined />
+          </template>
+          <template #suffix>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <a-segmented
+                v-model:value="searchMode"
+                :options="searchModeOptions"
+                size="small"
+                style="margin-right: 8px;"
+              />
+              <a-button type="primary" @click="handleSearch" :loading="searching">
+                搜索
+              </a-button>
+            </div>
+          </template>
+        </a-input>
+      </div>
     </div>
 
-    <!-- 搜索结果 -->
-    <div v-if="searchResults.length > 0" class="results-container">
+    <!-- 题目列表 -->
+    <div class="results-container">
       <QuestionList
-        :questions="searchResults"
+        :questions="displayQuestions"
         :pagination="true"
-        :page-size="5"
+        :page-size="10"
         @item-click="showQuestionDetail"
       />
     </div>
 
     <!-- 空状态提示 -->
     <a-empty 
-      v-else-if="hasSearched" 
+      v-if="!loadingRecommend && displayQuestions.length === 0 && !hasSearched" 
+      description="点击【获取推荐】按钮查看智能推荐的面试题" 
+      class="empty-state"
+    />
+    <a-empty 
+      v-else-if="hasSearched && displayQuestions.length === 0" 
       description="没有找到相关的面试题，请尝试其他关键词" 
       class="empty-state"
     />
@@ -76,6 +94,7 @@
       v-model="detailModalVisible"
       :question="currentQuestion"
       :index="currentIndex"
+      @feedback-changed="handleFeedbackChanged"
     />
 
     <!-- 页脚统计信息 -->
@@ -89,7 +108,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { questionApi, crawlerApi } from '../services'
 import { message } from 'ant-design-vue'
 import { SearchOutlined } from '@ant-design/icons-vue'
@@ -98,6 +117,12 @@ import QuestionDetailModal from '../components/QuestionDetailModal.vue'
 
 const questionCount = ref(0)
 const lastCrawlTime = ref('')
+
+// 推荐相关
+const recommendCount = ref(10)
+const useRerank = ref(false)  // 是否启用 Rerank（同时用于搜索和推荐）
+const loadingRecommend = ref(false)
+const recommendedQuestions = ref([])
 
 // 搜索相关
 const searchQuery = ref('')
@@ -110,6 +135,11 @@ const searchModeOptions = [
   { label: '精确', value: 'exact' },
   { label: '混合', value: 'hybrid' }
 ]
+
+// 显示的题目列表（搜索结果或推荐结果）
+const displayQuestions = computed(() => {
+  return hasSearched.value ? searchResults.value : recommendedQuestions.value
+})
 
 // 模态框相关
 const detailModalVisible = ref(false)
@@ -133,6 +163,35 @@ const loadStats = async () => {
   }
 }
 
+// 加载推荐题目
+const loadRecommendedQuestions = async () => {
+  loadingRecommend.value = true
+  hasSearched.value = false
+  
+  try {
+    const res = await questionApi.getRecommendedQuestions(
+      recommendCount.value,
+      true,  // 排除已掌握的题目
+      useRerank.value  // 是否启用 Rerank
+    )
+    
+    if (res.questions) {
+      recommendedQuestions.value = res.questions
+      const rerankText = useRerank.value ? '（使用 Rerank 重排序）' : ''
+      message.success(`已推荐 ${res.total} 道高优先级题目${rerankText}`)
+      
+      if (res.total === 0) {
+        message.info('所有题目都已掌握，太棒了！')
+      }
+    }
+  } catch (error) {
+    message.error('获取推荐题目失败')
+    console.error(error)
+  } finally {
+    loadingRecommend.value = false
+  }
+}
+
 // 处理搜索
 const handleSearch = async () => {
   if (!searchQuery.value.trim()) {
@@ -150,7 +209,8 @@ const handleSearch = async () => {
       undefined, // tags
       undefined, // difficulty
       undefined, // category
-      searchMode.value // search_mode
+      searchMode.value, // search_mode
+      useRerank.value // use_rerank - 搜索时也使用 Rerank
     )
     
     searchResults.value = res.results || []
@@ -163,7 +223,8 @@ const handleSearch = async () => {
         'exact': '精确',
         'hybrid': '混合'
       }
-      message.success(`找到 ${searchResults.value.length} 个结果（${modeText[searchMode.value]}搜索）`)
+      const rerankText = useRerank.value ? ' + Rerank' : ''
+      message.success(`找到 ${searchResults.value.length} 个结果（${modeText[searchMode.value]}搜索${rerankText}）`)
     }
   } catch (error) {
     message.error('搜索失败')
@@ -176,12 +237,30 @@ const handleSearch = async () => {
 // 显示题目详情
 const showQuestionDetail = (index) => {
   currentIndex.value = index
-  currentQuestion.value = searchResults.value[index]
+  currentQuestion.value = displayQuestions.value[index]
   detailModalVisible.value = true
+}
+
+// 处理反馈变化（收藏/错题本）
+const handleFeedbackChanged = async ({ questionId, type, value }) => {
+  console.log('反馈变化:', { questionId, type, value })
+  
+  // 更新当前列表中的题目数据
+  const updateList = hasSearched.value ? searchResults.value : recommendedQuestions.value
+  const question = updateList.find(q => q.id === questionId)
+  if (question) {
+    if (type === 'favorite') {
+      question.is_favorite = value
+    } else if (type === 'wrong_book') {
+      question.is_wrong_book = value
+    }
+  }
 }
 
 onMounted(() => {
   loadStats()
+  // 页面加载时自动获取推荐题目
+  loadRecommendedQuestions()
 })
 </script>
 
@@ -201,17 +280,21 @@ onMounted(() => {
     padding: 8px;
     height: calc(100vh - 56px - 40px);
   }
-  
-  .hero-image svg {
-    width: 120px;
-    height: 75px;
-  }
+}
+
+.top-section {
+  flex-shrink: 0;
+  margin-bottom: 16px;
+  width: 100%;
+}
+
+.recommend-card {
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, #f0f5ff 0%, #e6f4ff 100%);
+  border-radius: 8px;
 }
 
 .search-container {
-  flex-shrink: 0;
-  margin-bottom: 24px;
-  padding: 0 8px;
   width: 100%;
   text-align: center;
 }
@@ -243,26 +326,11 @@ onMounted(() => {
   background: #bfbfbf;
 }
 
-.hero-image {
-  margin-bottom: 24px;
+.empty-state {
+  flex: 1;
   display: flex;
+  align-items: center;
   justify-content: center;
-}
-
-.hero-image svg {
-  width: 160px;
-  height: 100px;
-}
-
-/* 淡入淡出动画 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 
 .search-input :deep(.ant-input-affix-wrapper) {
@@ -288,7 +356,7 @@ onMounted(() => {
 }
 
 .footer {
-  margin-top: 24px;
+  margin-top: 16px;
   padding: 16px 0;
   text-align: center;
   color: #8c8c8c;

@@ -98,11 +98,12 @@ export const questionApi = {
   },
 
   // 搜索面试题
-  searchQuestions(query, limit = 10, tags, difficulty, category, searchMode = 'semantic') {
+  searchQuestions(query, limit = 10, tags, difficulty, category, searchMode = 'semantic', useRerank = false) {
     const params = new URLSearchParams()
     params.append('query', query)
     params.append('limit', limit)
     params.append('search_mode', searchMode)
+    params.append('use_rerank', useRerank)
     if (tags && tags.length > 0) {
       tags.forEach(tag => params.append('tags', tag))
     }
