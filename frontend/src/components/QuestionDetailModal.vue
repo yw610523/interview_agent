@@ -153,9 +153,9 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'close', 'feedback-changed'])
 
 const visible = ref(false)
-const isFullscreen = ref(false)
-const modalWidth = ref(800)
-const modalMaxHeight = ref('70vh')
+const isFullscreen = ref(true) // 默认全屏
+const modalWidth = ref('100vw') // 默认全屏宽度
+const modalMaxHeight = ref('calc(100vh - 110px)') // 默认全屏高度
 
 // 反馈数据
 const feedbackData = ref({
@@ -171,8 +171,9 @@ const submittingFeedback = ref(false)
 watch(() => props.modelValue, (newVal) => {
   visible.value = newVal
   if (newVal) {
-    isFullscreen.value = false
-    modalWidth.value = 800
+    isFullscreen.value = true // 打开时默认全屏
+    modalWidth.value = '100vw'
+    modalMaxHeight.value = 'calc(100vh - 110px)'
     // 加载反馈数据
     loadFeedback()
   }
@@ -222,7 +223,7 @@ const handleClose = () => {
 const toggleFullscreen = () => {
   isFullscreen.value = !isFullscreen.value
   if (isFullscreen.value) {
-    modalWidth.value = window.innerWidth
+    modalWidth.value = '100vw'
     modalMaxHeight.value = 'calc(100vh - 110px)'
   } else {
     modalWidth.value = 800
@@ -473,5 +474,19 @@ onUnmounted(() => {
 :deep(.question-detail-modal.fullscreen .ant-modal-body) {
   flex: 1;
   overflow-y: auto !important;
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  :deep(.ant-modal) {
+    top: 0 !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+  }
+  
+  :deep(.ant-modal-content) {
+    border-radius: 0 !important;
+    min-height: 100vh;
+  }
 }
 </style>
