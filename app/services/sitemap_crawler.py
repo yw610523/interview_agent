@@ -378,9 +378,9 @@ class SitemapCrawler:
 
         self.stats.end_time = datetime.now().isoformat()
 
-        # Save results if configured
-        if self.config.save_results and self.config.output_dir:
-            self.save_results()
+        # 禁用本地保存结果，避免磁盘空间暴涨
+        # if self.config.save_results and self.config.output_dir:
+        #     self.save_results()
 
         logger.info(f"Crawl completed: {self.stats.successful_scans} successful, "
                     f"{self.stats.failed_scans} failed")
@@ -441,8 +441,9 @@ class SitemapCrawler:
 
         self.stats.end_time = datetime.now().isoformat()
 
-        if self.config.save_results and self.config.output_dir:
-            self.save_results()
+        # 禁用本地保存结果，避免磁盘空间暴涨
+        # if self.config.save_results and self.config.output_dir:
+        #     self.save_results()
 
         return self._results
 

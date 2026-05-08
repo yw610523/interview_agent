@@ -197,10 +197,10 @@ def run_crawler() -> Dict[str, Any]:
         # 打印报告
         crawler.print_report()
 
-        # 保存结果
-        if config.save_results:
-            filepath = crawler.save_results()
-            logger.info(f"结果已保存到: {filepath}")
+        # 禁用本地保存结果，避免磁盘空间暴涨
+        # if config.save_results:
+        #     filepath = crawler.save_results()
+        #     logger.info(f"结果已保存到: {filepath}")
 
         logger.info(
             f"解析出 {total_parsed_questions} 个面试问题，成功插入 {inserted_count} 个问题到向量数据库"
