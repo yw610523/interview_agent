@@ -168,16 +168,21 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   width: 100%;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #f0f0f0;
+  margin-bottom: 8px;
 }
 
 .modal-title {
-  font-size: 16px;
-  font-weight: 500;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1890ff;
   flex: 1;
   margin-right: 16px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  letter-spacing: 0.5px;
 }
 
 .modal-actions {
@@ -194,7 +199,10 @@ onUnmounted(() => {
 .answer-section h4 {
   margin-bottom: 16px;
   color: #262626;
-  font-size: 16px;
+  font-size: 17px;
+  font-weight: 600;
+  padding-left: 12px;
+  border-left: 3px solid #1890ff;
 }
 
 .meta-section {
