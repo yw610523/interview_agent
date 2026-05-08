@@ -15,7 +15,7 @@
               <div class="question-title">{{ item.title }}</div>
             </template>
             <template #description>
-              <div class="question-tags">
+              <div class="question-tags desktop-only">
                 <a-tag color="blue">{{ item.difficulty || 'medium' }}</a-tag>
                 <a-tag v-if="item.category" color="green">{{ item.category }}</a-tag>
                 <a-tag v-for="tag in (item.tags || [])" :key="tag" color="purple">
@@ -25,7 +25,7 @@
             </template>
           </a-list-item-meta>
           <template #actions>
-            <a-button type="link" size="small">查看详情 →</a-button>
+            <a-button type="link" size="small" class="desktop-only">查看详情 →</a-button>
           </template>
         </a-list-item>
       </template>
@@ -81,5 +81,21 @@ defineEmits(['itemClick'])
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* 移动端隐藏标签和操作按钮 */
+@media (max-width: 768px) {
+  .desktop-only {
+    display: none !important;
+  }
+  
+  .question-item {
+    padding: 16px;
+  }
+  
+  .question-title {
+    font-size: 16px;
+    margin-bottom: 0;
+  }
 }
 </style>

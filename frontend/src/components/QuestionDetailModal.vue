@@ -59,8 +59,8 @@
             </a-tag>
           </a-descriptions-item>
           <a-descriptions-item v-if="question.source_url" label="来源">
-            <a :href="question.source_url" target="_blank">
-              {{ question.source_url }}
+            <a :href="question.source_url" target="_blank" rel="noopener noreferrer">
+              🔗 查看来源
             </a>
           </a-descriptions-item>
           <a-descriptions-item v-if="question.importance_score" label="重要性评分">
