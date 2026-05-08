@@ -112,6 +112,46 @@
         </a-form>
       </a-tab-pane>
 
+      <!-- Rerank 配置 -->
+      <a-tab-pane key="rerank" tab="🔀 Rerank 配置">
+        <a-alert
+          message="Rerank 模型说明"
+          description="Rerank 模型用于对推荐题目进行重排序，提升推荐质量。复用 LLM 的 API Key 和 Base URL，只需配置模型名称即可。默认关闭，可根据需要开启。"
+          type="info"
+          show-icon
+          style="margin-bottom: 16px;"
+        />
+        
+        <a-form
+          :model="rerankConfig"
+          :label-col="{ span: 8 }"
+          :wrapper-col="{ span: 16 }"
+        >
+          <a-form-item label="启用 Rerank">
+            <a-switch v-model:checked="rerankConfig.enabled" />
+            <span style="margin-left: 8px; color: #8c8c8c;">{{ rerankConfig.enabled ? '已启用' : '未启用' }}</span>
+          </a-form-item>
+
+          <a-form-item label="模型名称" v-if="rerankConfig.enabled">
+            <a-input v-model:value="rerankConfig.model_name" placeholder="例如: rerank-sf" />
+            <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
+              复用 LLM 的 API Key 和 Base URL
+            </div>
+          </a-form-item>
+
+          <a-form-item :wrapper-col="{ offset: 8 }">
+            <a-space>
+              <a-button type="primary" @click="saveRerankConfig" :loading="savingRerank">
+                保存配置
+              </a-button>
+              <a-button @click="loadSystemConfig">
+                重置
+              </a-button>
+            </a-space>
+          </a-form-item>
+        </a-form>
+      </a-tab-pane>
+
       <!-- Redis配置 -->
       <a-tab-pane key="redis" tab="🗄️ Redis配置">
         <a-alert
@@ -239,6 +279,12 @@ const llmConfig = ref({
   model_max_output_tokens: ''
 })
 
+// Rerank 配置
+const rerankConfig = ref({
+  enabled: false,
+  model_name: 'rerank-sf'
+})
+
 // 邮件配置
 const emailConfig = ref({
   smtp_server: '',
@@ -258,6 +304,7 @@ const schedulerConfig = ref({
 // 状态
 const savingCrawler = ref(false)
 const savingLlm = ref(false)
+const savingRerank = ref(false)
 const savingEmail = ref(false)
 const savingScheduler = ref(false)
 const testingEmail = ref(false)
@@ -281,6 +328,11 @@ const loadSystemConfig = async () => {
         if (llmConfig.value.openai_api_key && llmConfig.value.openai_api_key.length > 10) {
           llmConfig.value.openai_api_key = llmConfig.value.openai_api_key
         }
+      }
+      
+      // 加载 Rerank 配置
+      if (config.rerank) {
+        rerankConfig.value = config.rerank
       }
       
       // 加载邮件配置
@@ -340,6 +392,22 @@ const saveLlmConfig = async () => {
     console.error(error)
   } finally {
     savingLlm.value = false
+  }
+}
+
+// 保存 Rerank 配置
+const saveRerankConfig = async () => {
+  savingRerank.value = true
+  try {
+    const res = await systemConfigApi.updateRerankConfig(rerankConfig.value)
+    if (res.status === 'success') {
+      message.success(res.message || 'Rerank 配置保存成功')
+    }
+  } catch (error) {
+    message.error('保存 Rerank 配置失败')
+    console.error(error)
+  } finally {
+    savingRerank.value = false
   }
 }
 

@@ -33,7 +33,6 @@ except ImportError:
 logger = logging.getLogger(__name__)
 load_dotenv()
 
-
 @dataclass
 class VectorRecord:
     """
@@ -49,7 +48,6 @@ class VectorRecord:
     difficulty: str
     category: str
     embedding: Optional[List[float]] = None
-
 
 class VectorService:
     """
@@ -623,3 +621,164 @@ class VectorService:
         except Exception as e:
             logger.error(f"统计问题数量失败: {str(e)}")
             return 0
+
+    def exact_search(
+        self,
+        query: str,
+        limit: int = 10,
+        filters: Optional[Dict[str, List[str]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        精确搜索（关键词匹配）
+
+        使用 Redis FT.SEARCH 进行文本匹配，支持标题和答案的关键词搜索
+
+        参数:
+            query: 搜索查询词
+            limit: 返回数量限制
+            filters: 过滤条件
+
+        返回:
+            匹配的问题列表
+        """
+        if not self.redis_client:
+            logger.error("Redis 客户端未初始化")
+            return []
+
+        # 确保索引存在
+        self._ensure_index()
+
+        try:
+            # 构建文本搜索查询（在 title 和 answer 字段中搜索）
+            # Redis FT.SEARCH 不支持 @field1|@field2:term，需要用 ( @field1:term | @field2:term )
+            search_terms = query.strip().split()
+
+            # 对于单个词
+            if len(search_terms) == 1:
+                term = search_terms[0]
+                base_query = f"(@title:*{term}* | @answer:*{term}*)"
+            else:
+                # 多个词用 | 连接（OR 关系）
+                title_parts = " | ".join([f"@title:*{term}*" for term in search_terms])
+                answer_parts = " | ".join([f"@answer:*{term}*" for term in search_terms])
+                base_query = f"({title_parts} | {answer_parts})"
+
+            # 添加过滤条件
+            if filters:
+                filter_parts = []
+                if "tags" in filters:
+                    tags = [f"{{{tag}}}" for tag in filters["tags"]]
+                    filter_parts.append(f"@tags:({'|'.join(tags)})")
+                if "difficulty" in filters:
+                    difficulties = [f"{{{d}}}" for d in filters["difficulty"]]
+                    filter_parts.append(f"@difficulty:({'|'.join(difficulties)})")
+                if "category" in filters:
+                    categories = [f"{{{c}}}" for c in filters["category"]]
+                    filter_parts.append(f"@category:({'|'.join(categories)})")
+
+                if filter_parts:
+                    base_query = f"{base_query} ({' '.join(filter_parts)})"
+
+            query_obj = (
+                Query(base_query)
+                .return_fields(
+                    "id",
+                    "title",
+                    "answer",
+                    "source_url",
+                    "tags",
+                    "importance_score",
+                    "difficulty",
+                    "category",
+                )
+                .dialect(2)
+            )
+
+            # 执行查询
+            results = self.redis_client.ft(self.index_name).search(query_obj)
+
+            # 处理结果
+            questions = []
+            for doc in results.docs[:limit]:
+                questions.append({
+                    "id": doc.id.replace("question:", ""),
+                    "title": doc.title,
+                    "answer": doc.answer,
+                    "source_url": doc.source_url,
+                    "tags": doc.tags.split(",") if doc.tags else [],
+                    "importance_score": float(doc.importance_score),
+                    "difficulty": doc.difficulty,
+                    "category": doc.category,
+                    "score": 1.0,  # 精确搜索给固定分数
+                })
+
+            logger.info(f"精确搜索找到 {len(questions)} 个结果")
+            return questions
+
+        except Exception as e:
+            logger.error(f"精确搜索失败: {str(e)}")
+            return []
+
+    def merge_search_results(
+        self,
+        semantic_results: List[Dict[str, Any]],
+        exact_results: List[Dict[str, Any]],
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        合并语义搜索和精确搜索结果
+
+        策略：
+        1. 去重（基于 question id）
+        2. 优先保留同时在两个结果中的题目
+        3. 然后按精确匹配 > 语义匹配的优先级排序
+
+        参数:
+            semantic_results: 语义搜索结果
+            exact_results: 精确搜索结果
+            limit: 最终返回数量
+
+        返回:
+            合并后的结果列表
+        """
+        # 使用字典去重，记录每个题目的来源
+        merged_dict = {}
+
+        # 先添加精确搜索结果（赋予更高权重）
+        for item in exact_results:
+            qid = item['id']
+            merged_dict[qid] = {
+                **item,
+                'match_type': 'exact',
+                'combined_score': item.get('score', 1.0) * 1.5,  # 精确匹配权重更高
+            }
+
+        # 再添加语义搜索结果（如果已存在则跳过）
+        for item in semantic_results:
+            qid = item['id']
+            if qid not in merged_dict:
+                merged_dict[qid] = {
+                    **item,
+                    'match_type': 'semantic',
+                    'combined_score': item.get('score', 0.0),
+                }
+            else:
+                # 如果同时出现在两个结果中，提升分数
+                merged_dict[qid]['match_type'] = 'both'
+                merged_dict[qid]['combined_score'] += item.get('score', 0.0) * 0.5
+
+        # 按综合分数排序
+        sorted_results = sorted(
+            merged_dict.values(),
+            key=lambda x: x['combined_score'],
+            reverse=True
+        )
+
+        # 移除临时字段，返回前 limit 个
+        final_results = []
+        for item in sorted_results[:limit]:
+            result = {k: v for k, v in item.items() if k not in ['match_type', 'combined_score']}
+            final_results.append(result)
+
+        logger.info(f"混合搜索合并结果: {len(final_results)} 个 (精确:{len(exact_results)}, 语义:{len(semantic_results)})")
+        return final_results

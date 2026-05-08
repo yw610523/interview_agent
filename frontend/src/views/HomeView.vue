@@ -39,9 +39,17 @@
           <SearchOutlined />
         </template>
         <template #suffix>
-          <a-button type="primary" @click="handleSearch" :loading="searching">
-            搜索
-          </a-button>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <a-segmented
+              v-model:value="searchMode"
+              :options="searchModeOptions"
+              size="small"
+              style="margin-right: 8px;"
+            />
+            <a-button type="primary" @click="handleSearch" :loading="searching">
+              搜索
+            </a-button>
+          </div>
         </template>
       </a-input>
     </div>
@@ -96,6 +104,12 @@ const searchQuery = ref('')
 const searching = ref(false)
 const searchResults = ref([])
 const hasSearched = ref(false)
+const searchMode = ref('semantic') // semantic | exact | hybrid
+const searchModeOptions = [
+  { label: '语义', value: 'semantic' },
+  { label: '精确', value: 'exact' },
+  { label: '混合', value: 'hybrid' }
+]
 
 // 模态框相关
 const detailModalVisible = ref(false)
@@ -130,12 +144,26 @@ const handleSearch = async () => {
   searchResults.value = []
 
   try {
-    const res = await questionApi.searchQuestions(searchQuery.value, 10)
+    const res = await questionApi.searchQuestions(
+      searchQuery.value,
+      10,
+      undefined, // tags
+      undefined, // difficulty
+      undefined, // category
+      searchMode.value // search_mode
+    )
     
     searchResults.value = res.results || []
     
     if (searchResults.value.length === 0) {
       message.info('没有找到相关的面试题')
+    } else {
+      const modeText = {
+        'semantic': '语义',
+        'exact': '精确',
+        'hybrid': '混合'
+      }
+      message.success(`找到 ${searchResults.value.length} 个结果（${modeText[searchMode.value]}搜索）`)
     }
   } catch (error) {
     message.error('搜索失败')

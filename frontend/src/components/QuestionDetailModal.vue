@@ -75,6 +75,55 @@
           </a-descriptions-item>
         </a-descriptions>
       </div>
+
+      <!-- 用户反馈区域 -->
+      <a-divider />
+      <div class="feedback-section">
+        <h4>📊 学习反馈</h4>
+        
+        <!-- 掌握程度评分 -->
+        <div class="feedback-item">
+          <span class="feedback-label">掌握程度：</span>
+          <a-rate 
+            v-model:value="feedbackData.masteryLevel" 
+            :count="5"
+            @change="handleMasteryChange"
+            :disabled="submittingFeedback"
+          />
+          <span class="feedback-hint">（{{ getMasteryText(feedbackData.masteryLevel) }}）</span>
+        </div>
+
+        <!-- 收藏和错题本按钮 -->
+        <div class="feedback-actions">
+          <a-button 
+            :type="feedbackData.isFavorite ? 'primary' : 'default'"
+            :icon="feedbackData.isFavorite ? '❤️' : '🤍'"
+            @click="toggleFavorite"
+            :loading="submittingFeedback"
+          >
+            {{ feedbackData.isFavorite ? '已收藏' : '收藏' }}
+          </a-button>
+          
+          <a-button 
+            :type="feedbackData.isWrongBook ? 'danger' : 'default'"
+            :icon="feedbackData.isWrongBook ? '❌' : '📝'"
+            @click="toggleWrongBook"
+            :loading="submittingFeedback"
+          >
+            {{ feedbackData.isWrongBook ? '已在错题本' : '加入错题本' }}
+          </a-button>
+        </div>
+
+        <!-- 复习信息 -->
+        <div v-if="feedbackData.reviewCount > 0" class="review-info">
+          <a-alert
+            type="info"
+            show-icon
+            :message="`已复习 ${feedbackData.reviewCount} 次`"
+            :description="getNextReviewText()"
+          />
+        </div>
+      </div>
     </div>
   </a-modal>
 </template>
@@ -83,6 +132,8 @@
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { CloseOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons-vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
+import { feedbackApi } from '../services'
+import { message } from 'ant-design-vue'
 
 const props = defineProps({
   modelValue: {
@@ -99,12 +150,22 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'close'])
+const emit = defineEmits(['update:modelValue', 'close', 'feedback-changed'])
 
 const visible = ref(false)
 const isFullscreen = ref(false)
 const modalWidth = ref(800)
 const modalMaxHeight = ref('70vh')
+
+// 反馈数据
+const feedbackData = ref({
+  masteryLevel: 0,
+  isFavorite: false,
+  isWrongBook: false,
+  reviewCount: 0,
+  nextReviewAt: null
+})
+const submittingFeedback = ref(false)
 
 // 监听外部传入的 visible
 watch(() => props.modelValue, (newVal) => {
@@ -112,8 +173,39 @@ watch(() => props.modelValue, (newVal) => {
   if (newVal) {
     isFullscreen.value = false
     modalWidth.value = 800
+    // 加载反馈数据
+    loadFeedback()
   }
 })
+
+// 加载反馈数据
+const loadFeedback = async () => {
+  if (!props.question?.id) return
+  
+  try {
+    const res = await feedbackApi.getFeedback(props.question.id)
+    if (res.has_feedback && res.feedback) {
+      feedbackData.value = {
+        masteryLevel: res.feedback.mastery_level,
+        isFavorite: res.feedback.is_favorite,
+        isWrongBook: res.feedback.is_wrong_book,
+        reviewCount: res.feedback.review_count,
+        nextReviewAt: res.feedback.next_review_at
+      }
+    } else {
+      // 重置为默认值
+      feedbackData.value = {
+        masteryLevel: 0,
+        isFavorite: false,
+        isWrongBook: false,
+        reviewCount: 0,
+        nextReviewAt: null
+      }
+    }
+  } catch (error) {
+    console.error('加载反馈数据失败:', error)
+  }
+}
 
 // 监听内部 visible 变化
 watch(visible, (newVal) => {
@@ -150,6 +242,113 @@ const handleKeyDown = (e) => {
   if (e.ctrlKey && e.key === 'Enter') {
     e.preventDefault()
     toggleFullscreen()
+  }
+}
+
+// 获取掌握程度文本
+const getMasteryText = (level) => {
+  const texts = ['未学习', '了解概念', '基本掌握', '熟练运用', '深入理解', '完全掌握']
+  return texts[level] || '未学习'
+}
+
+// 处理掌握程度变化
+const handleMasteryChange = async (value) => {
+  if (!props.question?.id) return
+  
+  // 防止重复提交
+  if (submittingFeedback.value) {
+    console.log('正在提交中，忽略本次操作')
+    return
+  }
+  
+  submittingFeedback.value = true
+  try {
+    await feedbackApi.submitFeedback(props.question.id, {
+      masteryLevel: value
+    })
+    message.success('掌握程度已更新')
+    // 重新加载反馈数据以获取最新的 review_count
+    await loadFeedback()
+  } catch (error) {
+    message.error('更新失败')
+    console.error(error)
+  } finally {
+    submittingFeedback.value = false
+  }
+}
+
+// 切换收藏状态
+const toggleFavorite = async () => {
+  if (!props.question?.id) return
+  
+  submittingFeedback.value = true
+  try {
+    const newStatus = !feedbackData.value.isFavorite
+    await feedbackApi.submitFeedback(props.question.id, {
+      isFavorite: newStatus
+    })
+    feedbackData.value.isFavorite = newStatus
+    message.success(newStatus ? '已加入收藏' : '已取消收藏')
+    // 通知父组件刷新
+    emit('feedback-changed', {
+      questionId: props.question.id,
+      type: 'favorite',
+      value: newStatus
+    })
+  } catch (error) {
+    message.error('操作失败')
+    console.error(error)
+  } finally {
+    submittingFeedback.value = false
+  }
+}
+
+// 切换错题本状态
+const toggleWrongBook = async () => {
+  if (!props.question?.id) return
+  
+  submittingFeedback.value = true
+  try {
+    const newStatus = !feedbackData.value.isWrongBook
+    await feedbackApi.submitFeedback(props.question.id, {
+      isWrongBook: newStatus
+    })
+    feedbackData.value.isWrongBook = newStatus
+    message.success(newStatus ? '已加入错题本' : '已从错题本移除')
+    // 通知父组件刷新
+    emit('feedback-changed', {
+      questionId: props.question.id,
+      type: 'wrong_book',
+      value: newStatus
+    })
+  } catch (error) {
+    message.error('操作失败')
+    console.error(error)
+  } finally {
+    submittingFeedback.value = false
+  }
+}
+
+// 获取下次复习时间文本
+const getNextReviewText = () => {
+  if (!feedbackData.value.nextReviewAt) {
+    return '完成评分后将计算下次复习时间'
+  }
+  
+  try {
+    const nextReview = new Date(feedbackData.value.nextReviewAt)
+    const now = new Date()
+    const daysUntil = Math.ceil((nextReview - now) / (1000 * 60 * 60 * 24))
+    
+    if (daysUntil <= 0) {
+      return '今天应该复习这道题！'
+    } else if (daysUntil === 1) {
+      return '明天应该复习这道题'
+    } else {
+      return `预计 ${daysUntil} 天后复习`
+    }
+  } catch (error) {
+    return '下次复习时间计算失败'
   }
 }
 
@@ -207,6 +406,48 @@ onUnmounted(() => {
 
 .meta-section {
   margin-top: 16px;
+}
+
+/* 用户反馈区域 */
+.feedback-section {
+  padding: 8px 0;
+}
+
+.feedback-section h4 {
+  margin-bottom: 16px;
+  color: #262626;
+  font-size: 17px;
+  font-weight: 600;
+  padding-left: 12px;
+  border-left: 3px solid #52c41a;
+}
+
+.feedback-item {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.feedback-label {
+  font-weight: 500;
+  color: #595959;
+  min-width: 80px;
+}
+
+.feedback-hint {
+  color: #8c8c8c;
+  font-size: 13px;
+}
+
+.feedback-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.review-info {
+  margin-top: 12px;
 }
 
 /* 模态框全屏样式 */
