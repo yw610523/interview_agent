@@ -35,9 +35,10 @@ class QuestionFeedback:
     question_id: str
     user_id: str = "default"  # 当前简化为单用户
     mastery_level: int = 0  # 掌握程度 0-5 (0=未学习, 5=完全掌握)
+    importance_score: float = 0.5  # 用户自定义重要性 (0-1)，默认0.5
     is_favorite: bool = False  # 是否收藏
     is_wrong_book: bool = False  # 是否在错题本
-    hide_from_recommendation: bool = False  # 是否从推荐中隐藏（满级后用户选择）
+    hide_from_recommendation: bool = False  # 是否从推荐中隐藏（软删除）
     hidden_at: Optional[str] = None  # 隐藏时间（用于30天后自动恢复）
     created_at: Optional[str] = None  # 创建时间
     updated_at: Optional[str] = None  # 更新时间
@@ -115,6 +116,42 @@ class FeedbackService:
         """生成反馈数据的 Redis key"""
         return f"feedback:{user_id}:{question_id}"
 
+    def should_auto_hide(self, mastery_level: int, importance_score: float) -> dict:
+        """
+        根据掌握程度和重要性判断是否应该自动软删除
+        
+        规则:
+        - 重要性 <= 0.3 (30): 2级及以上直接软删除
+        - 重要性 <= 0.6 (60): 3级弹窗询问，4-5级直接软删除
+        - 重要性 > 0.6 (60): 5级弹窗询问
+        
+        参数:
+            mastery_level: 掌握程度 (0-5)
+            importance_score: 重要性 (0-1)
+            
+        返回:
+            {
+                'should_hide': bool,  # 是否应该隐藏
+                'need_confirm': bool  # 是否需要用户确认
+            }
+        """
+        if importance_score <= 0.3:
+            # 低重要性：2级及以上直接软删除
+            if mastery_level >= 2:
+                return {'should_hide': True, 'need_confirm': False}
+        elif importance_score <= 0.6:
+            # 中等重要性：3级弹窗，4-5级直接软删除
+            if mastery_level == 3:
+                return {'should_hide': True, 'need_confirm': True}
+            elif mastery_level >= 4:
+                return {'should_hide': True, 'need_confirm': False}
+        else:
+            # 高重要性：5级弹窗询问
+            if mastery_level == 5:
+                return {'should_hide': True, 'need_confirm': True}
+        
+        return {'should_hide': False, 'need_confirm': False}
+
     def submit_feedback(self, question_id: str, feedback_data: Dict[str, Any]) -> bool:
         """
         提交题目反馈
@@ -144,19 +181,30 @@ class FeedbackService:
                 # 更新现有反馈
                 feedback = existing
 
+                # 处理重要性更新
+                if 'importance_score' in feedback_data:
+                    feedback.importance_score = feedback_data['importance_score']
+                    logger.info(f"重要性更新: question_id={question_id}, importance={feedback.importance_score}")
+
                 if 'mastery_level' in feedback_data:
                     old_mastery = feedback.mastery_level
                     new_mastery = feedback_data['mastery_level']
                     logger.info(f"评分变化: question_id={question_id}, old={old_mastery}, new={new_mastery}")
                     feedback.mastery_level = new_mastery
                     
-                    # 如果达到满级（5级），询问是否从推荐中隐藏
-                    if new_mastery == 5 and old_mastery < 5:
-                        # 用户可以选择不再在推荐中出现
-                        if feedback_data.get('hide_from_recommendation', False):
+                    # 检查是否应该自动软删除
+                    auto_hide_result = self.should_auto_hide(new_mastery, feedback.importance_score)
+                    
+                    if auto_hide_result['should_hide']:
+                        if auto_hide_result['need_confirm']:
+                            # 需要用户确认，设置标记但不立即隐藏
+                            feedback.hide_from_recommendation = False  # 等待用户确认
+                            logger.info(f"需要用户确认软删除: question_id={question_id}")
+                        else:
+                            # 直接软删除
                             feedback.hide_from_recommendation = True
                             feedback.hidden_at = now
-                            logger.info(f"题目已隐藏: question_id={question_id}")
+                            logger.info(f"题目已自动软删除: question_id={question_id}, mastery={new_mastery}, importance={feedback.importance_score}")
 
                 if 'is_favorite' in feedback_data:
                     feedback.is_favorite = feedback_data['is_favorite']
@@ -189,6 +237,7 @@ class FeedbackService:
                 'question_id': feedback.question_id,
                 'user_id': feedback.user_id,
                 'mastery_level': str(feedback.mastery_level),
+                'importance_score': str(feedback.importance_score),
                 'is_favorite': str(feedback.is_favorite),
                 'is_wrong_book': str(feedback.is_wrong_book),
                 'hide_from_recommendation': str(feedback.hide_from_recommendation),
@@ -229,6 +278,7 @@ class FeedbackService:
                 question_id=data.get(b'question_id', b'').decode(),
                 user_id=data.get(b'user_id', b'default').decode(),
                 mastery_level=int(data.get(b'mastery_level', b'0')),
+                importance_score=float(data.get(b'importance_score', b'0.5')),
                 is_favorite=data.get(b'is_favorite', b'False').decode() == 'True',
                 is_wrong_book=data.get(b'is_wrong_book', b'False').decode() == 'True',
                 hide_from_recommendation=data.get(b'hide_from_recommendation', b'False').decode() == 'True',
@@ -703,5 +753,50 @@ class FeedbackService:
                 return False
         
         return False
+
+    def get_hidden_questions(self, user_id: str = "default") -> List[str]:
+        """
+        获取已隐藏（软删除）的题目ID列表
+        
+        参数:
+            user_id: 用户ID
+            
+        返回:
+            隐藏的题目ID列表
+        """
+        if not self.redis_client:
+            return []
+        
+        try:
+            pattern = f"feedback:{user_id}:*"
+            keys = self.redis_client.keys(pattern)
+            hidden_ids = []
+            now = datetime.now()
+            
+            for key in keys:
+                data = self.redis_client.hgetall(key)
+                hide_flag = data.get(b'hide_from_recommendation', b'False').decode() == 'True'
+                hidden_at_str = data.get(b'hidden_at', b'').decode()
+                
+                if not hide_flag or not hidden_at_str:
+                    continue
+                
+                try:
+                    hidden_at = datetime.fromisoformat(hidden_at_str)
+                    days_hidden = (now - hidden_at).days
+                    
+                    # 只返回30天内的隐藏题目
+                    if days_hidden < 30:
+                        question_id = data.get(b'question_id', b'').decode()
+                        if question_id:
+                            hidden_ids.append(question_id)
+                except ValueError:
+                    continue
+            
+            return hidden_ids
+            
+        except Exception as e:
+            logger.error(f"获取隐藏题目失败: {str(e)}")
+            return []
 
 # Trigger reload

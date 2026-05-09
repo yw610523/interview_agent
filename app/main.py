@@ -966,9 +966,10 @@ async def delete_question(question_id: str):
 async def submit_feedback(
     question_id: str,
     mastery_level: Optional[int] = Query(None, ge=0, le=5, description="掌握程度 0-5"),
+    importance_score: Optional[float] = Query(None, ge=0, le=1, description="重要性 0-1"),
     is_favorite: Optional[bool] = Query(None, description="是否收藏"),
     is_wrong_book: Optional[bool] = Query(None, description="是否加入错题本"),
-    hide_from_recommendation: Optional[bool] = Query(None, description="是否从推荐中隐藏（满级时使用）")
+    hide_from_recommendation: Optional[bool] = Query(None, description="是否从推荐中隐藏（软删除）")
 ):
     """
     提交题目反馈
@@ -976,14 +977,17 @@ async def submit_feedback(
     参数:
         question_id: 题目ID
         mastery_level: 掌握程度 (0-5)，0=未学习，5=完全掌握
+        importance_score: 用户自定义重要性 (0-1)
         is_favorite: 是否收藏
         is_wrong_book: 是否加入错题本
-        hide_from_recommendation: 是否从推荐中隐藏（达到5级时可选）
+        hide_from_recommendation: 是否从推荐中隐藏（达到条件时自动或手动）
     """
     try:
         feedback_data = {}
         if mastery_level is not None:
             feedback_data['mastery_level'] = mastery_level
+        if importance_score is not None:
+            feedback_data['importance_score'] = importance_score
         if is_favorite is not None:
             feedback_data['is_favorite'] = is_favorite
         if is_wrong_book is not None:
@@ -998,8 +1002,25 @@ async def submit_feedback(
 
         if not success:
             raise HTTPException(status_code=500, detail="提交反馈失败")
+        
+        # 获取更新后的反馈，返回给前端
+        feedback = feedback_service.get_feedback(question_id)
+        response_data = {"status": "success", "message": "反馈已保存"}
+        
+        if feedback:
+            # 检查是否需要弹窗确认
+            auto_hide_result = feedback_service.should_auto_hide(
+                feedback.mastery_level, 
+                feedback.importance_score
+            )
+            response_data['auto_hide'] = auto_hide_result
+            response_data['feedback'] = {
+                'mastery_level': feedback.mastery_level,
+                'importance_score': feedback.importance_score,
+                'hide_from_recommendation': feedback.hide_from_recommendation
+            }
 
-        return {"status": "success", "message": "反馈已保存"}
+        return response_data
 
     except HTTPException:
         raise
@@ -1027,6 +1048,7 @@ async def get_question_feedback(question_id: str):
             "has_feedback": True,
             "feedback": {
                 "mastery_level": feedback.mastery_level,
+                "importance_score": feedback.importance_score,
                 "is_favorite": feedback.is_favorite,
                 "is_wrong_book": feedback.is_wrong_book,
                 "hide_from_recommendation": feedback.hide_from_recommendation,
@@ -1155,6 +1177,62 @@ async def delete_question(question_id: str):
         raise
     except Exception as e:
         logger.error(f"Delete question error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/users/me/hidden-questions", summary="获取已掌握（软删除）的题目")
+async def get_hidden_questions():
+    """
+    获取已隐藏（软删除）的题目列表
+    这些题目可以在这里进行永久删除
+    """
+    try:
+        hidden_ids = await run_sync(feedback_service.get_hidden_questions)
+
+        if not hidden_ids:
+            return {"questions": [], "total": 0}
+
+        # 获取所有题目
+        all_questions = await run_sync(vector_service.get_all)
+        hidden_questions = [q for q in all_questions if q['id'] in hidden_ids]
+
+        return {
+            "questions": hidden_questions,
+            "total": len(hidden_questions)
+        }
+
+    except Exception as e:
+        logger.error(f"Get hidden questions error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/users/me/hidden-questions/{question_id}", summary="永久删除题目")
+async def permanently_delete_question(question_id: str):
+    """
+    永久删除题目（从向量数据库中删除）
+    只能在“已掌握”列表中操作
+    """
+    try:
+        # 先从反馈中删除
+        key = feedback_service._get_feedback_key(question_id)
+        if feedback_service.redis_client:
+            feedback_service.redis_client.delete(key)
+        
+        # 再从向量数据库中删除
+        success = await run_sync(vector_service.delete_by_id, question_id)
+
+        if not success:
+            raise HTTPException(status_code=404, detail="题目不存在")
+
+        return {
+            "status": "success",
+            "message": "题目已永久删除"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Permanently delete question error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
