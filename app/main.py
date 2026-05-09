@@ -1057,6 +1057,13 @@ async def submit_feedback(
                 'hide_from_recommendation': feedback.hide_from_recommendation
             }
             response_data['question_importance'] = importance_score
+            
+            # 计算下次出现时间
+            next_days = feedback_service.calculate_next_appearance_days(
+                feedback.mastery_level,
+                importance_score
+            )
+            response_data['next_appearance_days'] = next_days
 
         return response_data
 

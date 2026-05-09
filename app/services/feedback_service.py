@@ -120,9 +120,10 @@ class FeedbackService:
         根据掌握程度和重要性判断是否应该自动软删除
         
         规则:
-        - 重要性 <= 0.3 (30): 2级及以上直接软删除
-        - 重要性 <= 0.6 (60): 3级弹窗询问，4-5级直接软删除
-        - 重要性 > 0.6 (60): 5级弹窗询问
+        - level = int(importance_score / 0.2)  # 0.2 = 1/5，将0-1映射到0-5
+        - mastery_level == level: 弹窗询问
+        - mastery_level > level: 自动软删除
+        - mastery_level < level: 继续规划出现时间
         
         参数:
             mastery_level: 掌握程度 (0-5)
@@ -134,22 +135,47 @@ class FeedbackService:
                 'need_confirm': bool  # 是否需要用户确认
             }
         """
-        if importance_score <= 0.3:
-            # 低重要性：2级及以上直接软删除
-            if mastery_level >= 2:
-                return {'should_hide': True, 'need_confirm': False}
-        elif importance_score <= 0.6:
-            # 中等重要性：3级弹窗，4-5级直接软删除
-            if mastery_level == 3:
-                return {'should_hide': True, 'need_confirm': True}
-            elif mastery_level >= 4:
-                return {'should_hide': True, 'need_confirm': False}
-        else:
-            # 高重要性：5级弹窗询问
-            if mastery_level == 5:
-                return {'should_hide': True, 'need_confirm': True}
+        # 计算对应的级别阈值
+        level_threshold = int(importance_score / 0.2) if importance_score >= 0.2 else 0
         
-        return {'should_hide': False, 'need_confirm': False}
+        if mastery_level == level_threshold:
+            # 等于阈值时弹窗询问
+            return {'should_hide': True, 'need_confirm': True}
+        elif mastery_level > level_threshold:
+            # 高于阈值时自动软删除
+            return {'should_hide': True, 'need_confirm': False}
+        else:
+            # 低于阈值时不处理
+            return {'should_hide': False, 'need_confirm': False}
+
+    def calculate_next_appearance_days(self, mastery_level: int, importance_score: float) -> int:
+        """
+        计算下次出现的间隔天数
+        
+        基于重要性和掌握程度的动态算法:
+        - 重要性越高，出现频率越高（间隔越短）
+        - 掌握程度越高，出现频率越低（间隔越长）
+        
+        公式: days = max(1, int((1 - importance_score) * 30 + mastery_level * 7))
+        
+        参数:
+            mastery_level: 掌握程度 (0-5)
+            importance_score: 重要性 (0-1)
+            
+        返回:
+            间隔天数 (至少1天)
+        """
+        # 基础间隔：重要性越低，间隔越长
+        base_days = (1 - importance_score) * 30
+        
+        # 掌握程度调整：掌握越好，间隔越长
+        mastery_adjustment = mastery_level * 7
+        
+        # 总间隔
+        total_days = int(base_days + mastery_adjustment)
+        
+        # 至少1天，最多90天
+        return max(1, min(90, total_days))
 
     def submit_feedback(self, question_id: str, feedback_data: Dict[str, Any]) -> bool:
         """
