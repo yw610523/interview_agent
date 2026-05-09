@@ -162,11 +162,6 @@ export const feedbackApi = {
     return apiClient.get(`/questions/${questionId}/feedback`)
   },
 
-  // 更新题目重要性
-  updateImportance(questionId, importanceScore) {
-    return apiClient.put(`/questions/${questionId}/importance?importance_score=${importanceScore}`)
-  },
-
   // 获取收藏列表
   getFavorites() {
     return apiClient.get('/users/me/favorites')
