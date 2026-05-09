@@ -113,16 +113,6 @@
             {{ feedbackData.isWrongBook ? '已在错题本' : '加入错题本' }}
           </a-button>
         </div>
-
-        <!-- 复习信息 -->
-        <div v-if="feedbackData.reviewCount > 0" class="review-info">
-          <a-alert
-            type="info"
-            show-icon
-            :message="`已复习 ${feedbackData.reviewCount} 次`"
-            :description="getNextReviewText()"
-          />
-        </div>
       </div>
     </div>
   </a-modal>
@@ -176,8 +166,7 @@ const feedbackData = ref({
   masteryLevel: 0,
   isFavorite: false,
   isWrongBook: false,
-  reviewCount: 0,
-  nextReviewAt: null
+  hideFromRecommendation: false
 })
 const submittingFeedback = ref(false)
 
@@ -250,8 +239,7 @@ const loadFeedback = async () => {
         masteryLevel: res.feedback.mastery_level,
         isFavorite: res.feedback.is_favorite,
         isWrongBook: res.feedback.is_wrong_book,
-        reviewCount: res.feedback.review_count,
-        nextReviewAt: res.feedback.next_review_at
+        hideFromRecommendation: res.feedback.hide_from_recommendation || false
       }
     } else {
       // 重置为默认值
@@ -259,8 +247,7 @@ const loadFeedback = async () => {
         masteryLevel: 0,
         isFavorite: false,
         isWrongBook: false,
-        reviewCount: 0,
-        nextReviewAt: null
+        hideFromRecommendation: false
       }
     }
   } catch (error) {
@@ -336,7 +323,7 @@ const handleMasteryChange = async (value) => {
       masteryLevel: value
     })
     message.success('掌握程度已更新')
-    // 重新加载反馈数据以获取最新的 review_count
+    // 重新加载反馈数据
     await loadFeedback()
   } catch (error) {
     message.error('更新失败')
@@ -395,29 +382,6 @@ const toggleWrongBook = async () => {
     console.error(error)
   } finally {
     submittingFeedback.value = false
-  }
-}
-
-// 获取下次复习时间文本
-const getNextReviewText = () => {
-  if (!feedbackData.value.nextReviewAt) {
-    return '完成评分后将计算下次复习时间'
-  }
-  
-  try {
-    const nextReview = new Date(feedbackData.value.nextReviewAt)
-    const now = new Date()
-    const daysUntil = Math.ceil((nextReview - now) / (1000 * 60 * 60 * 24))
-    
-    if (daysUntil <= 0) {
-      return '今天应该复习这道题！'
-    } else if (daysUntil === 1) {
-      return '明天应该复习这道题'
-    } else {
-      return `预计 ${daysUntil} 天后复习`
-    }
-  } catch (error) {
-    return '下次复习时间计算失败'
   }
 }
 
@@ -513,10 +477,6 @@ onUnmounted(() => {
   display: flex;
   gap: 12px;
   margin-bottom: 16px;
-}
-
-.review-info {
-  margin-top: 12px;
 }
 
 /* 模态框全屏样式 */
