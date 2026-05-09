@@ -140,7 +140,7 @@ export const questionApi = {
 // 用户反馈相关 API (RESTful)
 export const feedbackApi = {
   // 提交反馈
-  submitFeedback(questionId, { masteryLevel, isFavorite, isWrongBook }) {
+  submitFeedback(questionId, { masteryLevel, isFavorite, isWrongBook, hideFromRecommendation }) {
     const params = new URLSearchParams()
     if (masteryLevel !== undefined && masteryLevel !== null) {
       params.append('mastery_level', masteryLevel)
@@ -151,12 +151,20 @@ export const feedbackApi = {
     if (isWrongBook !== undefined && isWrongBook !== null) {
       params.append('is_wrong_book', isWrongBook)
     }
+    if (hideFromRecommendation !== undefined && hideFromRecommendation !== null) {
+      params.append('hide_from_recommendation', hideFromRecommendation)
+    }
     return apiClient.post(`/questions/${questionId}/feedback?${params.toString()}`)
   },
 
   // 获取题目反馈
   getFeedback(questionId) {
     return apiClient.get(`/questions/${questionId}/feedback`)
+  },
+
+  // 更新题目重要性
+  updateImportance(questionId, importanceScore) {
+    return apiClient.put(`/questions/${questionId}/importance?importance_score=${importanceScore}`)
   },
 
   // 获取收藏列表
@@ -177,5 +185,15 @@ export const feedbackApi = {
   // 从错题本移除
   removeFromWrongBook(questionId) {
     return apiClient.delete(`/users/me/wrong-books/${questionId}`)
+  },
+
+  // 获取已掌握（软删除）的题目
+  getHiddenQuestions() {
+    return apiClient.get('/users/me/hidden-questions')
+  },
+
+  // 永久删除题目
+  permanentlyDeleteQuestion(questionId) {
+    return apiClient.delete(`/users/me/hidden-questions/${questionId}`)
   }
 }

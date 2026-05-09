@@ -444,6 +444,42 @@ class VectorService:
             logger.error(f"删除问题失败: {str(e)}")
             return False
 
+    def update(self, question_id: str, question_data: Dict[str, Any]) -> bool:
+        """
+        更新题目数据
+        
+        参数:
+            question_id: 题目ID
+            question_data: 题目数据字典
+            
+        返回:
+            是否成功
+        """
+        if not self.redis_client:
+            return False
+        
+        try:
+            key = f"question:{question_id}"
+            
+            # 构建更新数据
+            data = {
+                "title": question_data.get('title', ''),
+                "answer": question_data.get('answer', ''),
+                "source_url": question_data.get('source_url', ''),
+                "tags": ",".join(question_data.get('tags', [])),
+                "importance_score": str(question_data.get('importance_score', 0)),
+                "difficulty": question_data.get('difficulty', ''),
+                "category": question_data.get('category', ''),
+            }
+            
+            self.redis_client.hset(key, mapping=data)
+            logger.info(f"题目更新成功: {question_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"更新题目失败: {str(e)}")
+            return False
+
     def get_all(self) -> List[Dict[str, Any]]:
         """
         获取所有问题

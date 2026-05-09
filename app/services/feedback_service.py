@@ -35,7 +35,6 @@ class QuestionFeedback:
     question_id: str
     user_id: str = "default"  # 当前简化为单用户
     mastery_level: int = 0  # 掌握程度 0-5 (0=未学习, 5=完全掌握)
-    importance_score: float = 0.5  # 用户自定义重要性 (0-1)，默认0.5
     is_favorite: bool = False  # 是否收藏
     is_wrong_book: bool = False  # 是否在错题本
     hide_from_recommendation: bool = False  # 是否从推荐中隐藏（软删除）
@@ -127,7 +126,7 @@ class FeedbackService:
         
         参数:
             mastery_level: 掌握程度 (0-5)
-            importance_score: 重要性 (0-1)
+            importance_score: 题目重要性 (0-1)，从题目数据中获取
             
         返回:
             {
@@ -181,30 +180,11 @@ class FeedbackService:
                 # 更新现有反馈
                 feedback = existing
 
-                # 处理重要性更新
-                if 'importance_score' in feedback_data:
-                    feedback.importance_score = feedback_data['importance_score']
-                    logger.info(f"重要性更新: question_id={question_id}, importance={feedback.importance_score}")
-
                 if 'mastery_level' in feedback_data:
                     old_mastery = feedback.mastery_level
                     new_mastery = feedback_data['mastery_level']
                     logger.info(f"评分变化: question_id={question_id}, old={old_mastery}, new={new_mastery}")
                     feedback.mastery_level = new_mastery
-                    
-                    # 检查是否应该自动软删除
-                    auto_hide_result = self.should_auto_hide(new_mastery, feedback.importance_score)
-                    
-                    if auto_hide_result['should_hide']:
-                        if auto_hide_result['need_confirm']:
-                            # 需要用户确认，设置标记但不立即隐藏
-                            feedback.hide_from_recommendation = False  # 等待用户确认
-                            logger.info(f"需要用户确认软删除: question_id={question_id}")
-                        else:
-                            # 直接软删除
-                            feedback.hide_from_recommendation = True
-                            feedback.hidden_at = now
-                            logger.info(f"题目已自动软删除: question_id={question_id}, mastery={new_mastery}, importance={feedback.importance_score}")
 
                 if 'is_favorite' in feedback_data:
                     feedback.is_favorite = feedback_data['is_favorite']
@@ -237,7 +217,6 @@ class FeedbackService:
                 'question_id': feedback.question_id,
                 'user_id': feedback.user_id,
                 'mastery_level': str(feedback.mastery_level),
-                'importance_score': str(feedback.importance_score),
                 'is_favorite': str(feedback.is_favorite),
                 'is_wrong_book': str(feedback.is_wrong_book),
                 'hide_from_recommendation': str(feedback.hide_from_recommendation),
@@ -278,7 +257,6 @@ class FeedbackService:
                 question_id=data.get(b'question_id', b'').decode(),
                 user_id=data.get(b'user_id', b'default').decode(),
                 mastery_level=int(data.get(b'mastery_level', b'0')),
-                importance_score=float(data.get(b'importance_score', b'0.5')),
                 is_favorite=data.get(b'is_favorite', b'False').decode() == 'True',
                 is_wrong_book=data.get(b'is_wrong_book', b'False').decode() == 'True',
                 hide_from_recommendation=data.get(b'hide_from_recommendation', b'False').decode() == 'True',

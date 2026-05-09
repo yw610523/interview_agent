@@ -93,6 +93,22 @@
           <span class="feedback-hint">（{{ getMasteryText(feedbackData.masteryLevel) }}）</span>
         </div>
 
+        <!-- 重要性编辑 -->
+        <div class="feedback-item">
+          <span class="feedback-label">重要性：</span>
+          <a-slider 
+            v-model:value="questionImportance" 
+            :min="0" 
+            :max="1" 
+            :step="0.05"
+            :marks="{0: '0%', 0.25: '25%', 0.5: '50%', 0.75: '75%', 1: '100%'}"
+            @change="handleImportanceChange"
+            :disabled="submittingFeedback"
+            style="flex: 1; max-width: 400px;"
+          />
+          <span class="feedback-hint">（{{ Math.round(questionImportance * 100) }}%）</span>
+        </div>
+
         <!-- 收藏和错题本按钮 -->
         <div class="feedback-actions">
           <a-button 
@@ -119,11 +135,11 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { CloseOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons-vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import { feedbackApi } from '../services'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 
 const props = defineProps({
   modelValue: {
@@ -146,6 +162,11 @@ const visible = ref(false)
 const isFullscreen = ref(false) // 默认不全屏
 const modalWidth = ref(800) // 默认电脑端宽度
 const modalMaxHeight = ref('70vh') // 默认电脑端高度
+
+// 从题目数据中获取重要性评分
+const questionImportance = computed(() => {
+  return props.question?.importance_score || 0.5
+})
 
 // 检测是否为移动端
 const isMobile = () => {
@@ -319,12 +340,48 @@ const handleMasteryChange = async (value) => {
   
   submittingFeedback.value = true
   try {
-    await feedbackApi.submitFeedback(props.question.id, {
+    const res = await feedbackApi.submitFeedback(props.question.id, {
       masteryLevel: value
     })
-    message.success('掌握程度已更新')
-    // 重新加载反馈数据
-    await loadFeedback()
+    
+    // 检查是否需要弹窗确认
+    if (res.auto_hide && res.auto_hide.need_confirm) {
+      // 需要用户确认
+      Modal.confirm({
+        title: '题目已掌握',
+        content: `该题重要性为${Math.round(res.question_importance * 100)}%，已达到${getMasteryText(value)}水平。是否将其从推荐中隐藏？`,
+        okText: '隐藏（30天后可恢复）',
+        cancelText: '继续显示',
+        onOk: async () => {
+          await feedbackApi.submitFeedback(props.question.id, {
+            hideFromRecommendation: true
+          })
+          message.success('题目已隐藏')
+          await loadFeedback()
+          emit('feedback-changed', {
+            questionId: props.question.id,
+            type: 'hidden',
+            value: true
+          })
+        },
+        onCancel: () => {
+          message.info('题目将继续出现在推荐中')
+        }
+      })
+    } else if (res.auto_hide && res.auto_hide.should_hide) {
+      // 自动软删除
+      message.success(`题目已自动隐藏（重要性${Math.round(res.question_importance * 100)}%，${getMasteryText(value)}）`)
+      await loadFeedback()
+      emit('feedback-changed', {
+        questionId: props.question.id,
+        type: 'hidden',
+        value: true
+      })
+    } else {
+      // 普通更新
+      message.success('掌握程度已更新')
+      await loadFeedback()
+    }
   } catch (error) {
     message.error('更新失败')
     console.error(error)
@@ -332,6 +389,25 @@ const handleMasteryChange = async (value) => {
     submittingFeedback.value = false
   }
 }
+
+// 处理重要性变化
+const handleImportanceChange = async (value) => {
+  if (!props.question?.id) return
+  
+  // 防抖：延迟500ms后提交
+  clearTimeout(importanceChangeTimer)
+  importanceChangeTimer = setTimeout(async () => {
+    try {
+      await feedbackApi.updateImportance(props.question.id, value)
+      message.success('重要性已更新')
+    } catch (error) {
+      message.error('更新失败')
+      console.error(error)
+    }
+  }, 500)
+}
+
+let importanceChangeTimer = null
 
 // 切换收藏状态
 const toggleFavorite = async () => {
