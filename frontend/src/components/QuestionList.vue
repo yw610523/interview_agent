@@ -14,19 +14,7 @@
             <template #title>
               <div class="question-title">{{ item.title }}</div>
             </template>
-            <template #description>
-              <div class="question-tags desktop-only">
-                <a-tag color="blue">{{ item.difficulty || 'medium' }}</a-tag>
-                <a-tag v-if="item.category" color="green">{{ item.category }}</a-tag>
-                <a-tag v-for="tag in (item.tags || [])" :key="tag" color="purple">
-                  {{ tag }}
-                </a-tag>
-              </div>
-            </template>
           </a-list-item-meta>
-          <template #actions>
-            <a-button type="link" size="small" class="desktop-only">查看详情 →</a-button>
-          </template>
         </a-list-item>
       </template>
     </a-list>

@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from queue import Queue, Empty
 from threading import Thread
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -51,10 +52,24 @@ llm_service = LLMService()
 vector_service = VectorService()
 feedback_service = FeedbackService()
 
+# 线程池（用于将同步I/O操作放入后台执行，不阻塞事件循环）
+executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="sync_io")
+
 # 设置配置热加载管理器的服务引用
 config_reload_manager.set_services(llm_service, vector_service)
 
+
+def run_sync(func, *args, **kwargs):
+    """
+    在后台线程中运行同步函数，不阻塞事件循环
+
+    用法: result = await run_sync(vector_service.search, query, limit)
+    """
+    loop = asyncio.get_event_loop()
+    return loop.run_in_executor(executor, lambda: func(*args, **kwargs))
+
 # 定义面试题数据模型
+
 
 class InterviewQuestion(BaseModel):
     title: str
@@ -67,6 +82,7 @@ class InterviewQuestion(BaseModel):
 
 # 爬取结果模型
 
+
 class CrawlResult(BaseModel):
     status: str
     message: str
@@ -77,10 +93,13 @@ class CrawlResult(BaseModel):
 
 # 搜索结果模型
 
+
 class SearchResult(BaseModel):
     query: str
     results: List[Dict[str, Any]]
     total: int
+    rerank_used: bool = False  # 是否使用了 Rerank
+
 
 @app.post("/api/questions/ingest", summary="接收并存储面试题")
 async def ingest_question(questions: List[InterviewQuestion]):
@@ -104,13 +123,14 @@ async def ingest_question(questions: List[InterviewQuestion]):
             records.append(record)
 
         # 插入向量数据库
-        count = vector_service.insert_questions(records)
+        count = await run_sync(vector_service.insert_questions, records)
 
         return {"status": "success", "count": count, "message": "数据已入库"}
 
     except Exception as e:
         logger.error(f"Ingest error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 def run_crawler() -> Dict[str, Any]:
     """
@@ -252,6 +272,7 @@ def run_crawler() -> Dict[str, Any]:
         logger.error(f"爬虫任务失败: {str(e)}")
         return {"status": "error", "message": str(e)}
 
+
 @app.get("/api/crawl/run", summary="手动触发爬虫任务")
 async def trigger_crawl():
     """
@@ -262,6 +283,7 @@ async def trigger_crawl():
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/crawl/run-async", summary="异步触发爬虫任务")
 async def trigger_crawl_async():
@@ -477,6 +499,7 @@ async def trigger_crawl_async():
         logger.error(f"启动异步爬虫任务失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/crawl/task/{task_id}", summary="获取爬虫任务状态")
 async def get_crawl_task_status(task_id: str):
     """
@@ -488,6 +511,7 @@ async def get_crawl_task_status(task_id: str):
         raise HTTPException(status_code=404, detail="任务不存在")
 
     return task.to_dict()
+
 
 @app.post("/api/crawl/stop/{task_id}", summary="停止爬虫任务")
 async def stop_crawl_task(task_id: str):
@@ -505,12 +529,14 @@ async def stop_crawl_task(task_id: str):
         "task_id": task_id
     }
 
+
 @app.get("/api/crawl/tasks", summary="获取所有爬虫任务")
 async def get_all_crawl_tasks():
     """
     获取所有爬虫任务的状态
     """
     return crawl_task_manager.get_all_tasks()
+
 
 @app.get("/api/crawl/status", summary="获取爬虫状态")
 async def get_crawl_status():
@@ -596,14 +622,16 @@ async def get_crawl_status():
 
     return status_info
 
+
 @app.get("/api/questions/search", summary="搜索面试题")
 async def search_questions(
         query: str,
-        limit: int = Query(10, ge=1, le=50),
+        limit: int = Query(10, ge=1, le=100),
         tags: Optional[List[str]] = Query(None),
         difficulty: Optional[List[str]] = Query(None),
         category: Optional[List[str]] = Query(None),
-        search_mode: str = Query("semantic", regex="^(semantic|exact|hybrid)$"),
+        search_mode: str = Query("hybrid", pattern="^(semantic|exact|hybrid)$"),
+        use_rerank: bool = Query(True, description="是否使用 Rerank 模型重排序搜索结果（默认开启，自动降级）"),
 ):
     """
     根据关键词搜索面试题
@@ -615,6 +643,7 @@ async def search_questions(
         difficulty: 难度过滤（easy/medium/hard）
         category: 分类过滤
         search_mode: 搜索模式（semantic=语义搜索, exact=精确搜索, hybrid=混合搜索）
+        use_rerank: 是否使用 Rerank 模型对搜索结果进行重排序（默认True，后端会自动降级）
     """
     try:
         # 构建过滤条件
@@ -629,18 +658,20 @@ async def search_questions(
         # 根据搜索模式执行不同的搜索策略
         if search_mode == "semantic":
             # 纯语义搜索（向量相似度）
-            results = vector_service.search(query, limit, filters if filters else None)
+            results = await run_sync(vector_service.search, query, limit, filters if filters else None)
             logger.info(f"语义搜索: '{query}' -> {len(results)} 个结果")
 
         elif search_mode == "exact":
             # 纯精确搜索（关键词匹配）
-            results = vector_service.exact_search(query, limit, filters if filters else None)
+            results = await run_sync(vector_service.exact_search, query, limit, filters if filters else None)
             logger.info(f"精确搜索: '{query}' -> {len(results)} 个结果")
 
         elif search_mode == "hybrid":
-            # 混合搜索：结合语义和精确搜索结果
-            semantic_results = vector_service.search(query, limit * 2, filters if filters else None)
-            exact_results = vector_service.exact_search(query, limit * 2, filters if filters else None)
+            # 混合搜索：结合语义和精确搜索结果（并行执行）
+            semantic_results, exact_results = await asyncio.gather(
+                run_sync(vector_service.search, query, limit * 2, filters if filters else None),
+                run_sync(vector_service.exact_search, query, limit * 2, filters if filters else None),
+            )
 
             # 合并结果并去重（优先保留精确匹配的高分结果）
             merged_results = vector_service.merge_search_results(
@@ -652,7 +683,21 @@ async def search_questions(
         else:
             raise HTTPException(status_code=400, detail=f"不支持的搜索模式: {search_mode}")
 
-        return SearchResult(query=query, results=results, total=len(results))
+        # 如果启用 Rerank，对搜索结果进行重排序
+        rerank_success = False
+        if use_rerank and feedback_service.rerank_enabled and results:
+            try:
+                reranked_results = await run_sync(
+                    feedback_service.rerank_questions, query, results, limit
+                )
+                results = reranked_results
+                rerank_success = True
+                logger.info(f"Rerank 重排序完成: '{query}' -> {len(results)} 个结果")
+            except Exception as e:
+                logger.warning(f"Rerank 失败，使用原始搜索结果: {str(e)}")
+                # Rerank 失败不影响搜索结果，继续使用原始结果
+
+        return SearchResult(query=query, results=results, total=len(results), rerank_used=rerank_success)
 
     except HTTPException:
         raise
@@ -660,17 +705,19 @@ async def search_questions(
         logger.error(f"Search error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/questions/count", summary="获取面试题总数")
 async def get_question_count():
     """
     获取向量数据库中面试题的总数
     """
     try:
-        count = vector_service.count()
+        count = await run_sync(vector_service.count)
         return {"count": count}
     except Exception as e:
         logger.error(f"Count error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/questions/generate-batch", summary="批量生成面试题")
 async def generate_batch_questions(
@@ -691,7 +738,7 @@ async def generate_batch_questions(
     logger.info(f"收到批量生成请求: count={count}, difficulty={difficulty}, category={category}, tags={tags}")
     try:
         # 获取所有题目
-        all_questions = vector_service.get_all()
+        all_questions = await run_sync(vector_service.get_all)
         logger.info(f"从向量数据库获取到 {len(all_questions)} 个问题")
 
         if not all_questions:
@@ -740,23 +787,25 @@ async def generate_batch_questions(
         logger.error(f"批量生成面试题失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/questions/generate", summary="使用大模型生成答案")
 async def generate_answer(question: str):
     """
     使用大模型为给定问题生成答案
     """
     try:
-        answer = llm_service.generate_answer(question)
+        answer = await run_sync(llm_service.generate_answer, question)
         return {"question": question, "answer": answer}
     except Exception as e:
         logger.error(f"Generate answer error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/questions/recommended", summary="智能推荐题目")
 async def get_recommended_questions(
     limit: int = Query(20, ge=1, le=100, description="返回数量"),
     exclude_mastered: bool = Query(True, description="是否排除已掌握的题目"),
-    use_rerank: bool = Query(False, description="是否使用 Rerank 模型重排序")
+    use_rerank: bool = Query(True, description="是否使用 Rerank 模型重排序（默认开启，自动降级）")
 ):
     """
     基于用户反馈和艾宾浩斯曲线智能推荐题目
@@ -764,11 +813,11 @@ async def get_recommended_questions(
     参数:
         limit: 返回数量
         exclude_mastered: 是否排除完全掌握的题目（mastery_level=5）
-        use_rerank: 是否使用 Rerank 模型进行重排序（需要配置 RERANK_ENABLED=true）
+        use_rerank: 是否使用 Rerank 模型进行重排序（默认True，后端会自动降级）
     """
     try:
         # 获取所有题目
-        all_questions = vector_service.get_all()
+        all_questions = await run_sync(vector_service.get_all)
 
         if not all_questions:
             return {"questions": [], "total": 0}
@@ -796,40 +845,62 @@ async def get_recommended_questions(
         scored_questions.sort(key=lambda x: x['priority_score'], reverse=True)
 
         # 如果启用 Rerank，先取更多候选，然后重排序
-        if use_rerank:
-            # 取 3 倍数量的候选题目
-            candidate_count = min(limit * 3, len(scored_questions))
-            candidates = scored_questions[:candidate_count]
+        rerank_success = False
+        if use_rerank and feedback_service.rerank_enabled:
+            try:
+                # 取 3 倍数量的候选题目，增加随机性避免每次都是同样的题
+                import random
+                candidate_pool_size = min(limit * 5, len(scored_questions))
+                candidate_pool = scored_questions[:candidate_pool_size]
+                # 从候选池中随机抽样
+                candidate_count = min(limit * 3, len(candidate_pool))
+                candidates = random.sample(candidate_pool, candidate_count)
 
-            # 构建用户画像（简化版：基于用户的错题本和收藏）
-            user_profile = "我需要复习以下类型的面试题"
-            wrong_books = feedback_service.get_wrong_book()
-            favorites = feedback_service.get_favorites()
+                # 构建用户画像（简化版：基于用户的错题本和收藏）
+                user_profile = "我需要复习以下类型的面试题"
+                wrong_books = feedback_service.get_wrong_book()
+                favorites = feedback_service.get_favorites()
 
-            if wrong_books or favorites:
-                # 如果有错题或收藏，可以构建更精确的用户画像
-                user_profile += (
-                    f"（共 {len(wrong_books)} 道错题，{len(favorites)} 道收藏）"
+                if wrong_books or favorites:
+                    # 如果有错题或收藏，可以构建更精确的用户画像
+                    user_profile += (
+                        f"（共 {len(wrong_books)} 道错题，{len(favorites)} 道收藏）"
+                    )
+
+                # 执行 Rerank
+                reranked = await run_sync(
+                    feedback_service.rerank_questions,
+                    user_profile, candidates, limit
                 )
-
-            # 执行 Rerank
-            reranked = feedback_service.rerank_questions(
-                user_profile, candidates, limit
-            )
-            recommended = reranked
+                recommended = reranked
+                rerank_success = True
+                logger.info(f"推荐接口 Rerank 成功，返回 {len(recommended)} 道题目")
+            except Exception as e:
+                logger.warning(f"Rerank 失败，降级为默认排序: {str(e)}")
+                # Rerank 失败，降级为默认排序（带随机性）
+                import random
+                candidate_pool_size = min(limit * 3, len(scored_questions))
+                candidate_pool = scored_questions[:candidate_pool_size]
+                random.shuffle(candidate_pool)
+                recommended = candidate_pool[:limit]
         else:
-            # 直接返回前 limit 个
-            recommended = scored_questions[:limit]
+            # 直接返回前 limit 个（带随机性，从候选池中随机抽样）
+            import random
+            candidate_pool_size = min(limit * 3, len(scored_questions))
+            candidate_pool = scored_questions[:candidate_pool_size]
+            random.shuffle(candidate_pool)
+            recommended = candidate_pool[:limit]
 
         return {
             "questions": recommended,
             "total": len(recommended),
-            "rerank_used": use_rerank and feedback_service.rerank_enabled
+            "rerank_used": rerank_success
         }
 
     except Exception as e:
         logger.error(f"Get recommended questions error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/questions/{question_id}", summary="获取单个面试题详情")
 async def get_question(question_id: str):
@@ -849,6 +920,7 @@ async def get_question(question_id: str):
     except Exception as e:
         logger.error(f"Get question error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.delete("/api/questions/{question_id}", summary="删除面试题")
 async def delete_question(question_id: str):
@@ -870,6 +942,7 @@ async def delete_question(question_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # ==================== 用户反馈相关 API (RESTful) ====================
+
 
 @app.post("/api/questions/{question_id}/feedback", summary="提交题目反馈")
 async def submit_feedback(
@@ -912,6 +985,7 @@ async def submit_feedback(
         logger.error(f"Submit feedback error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/questions/{question_id}/feedback", summary="获取题目反馈")
 async def get_question_feedback(question_id: str):
     """
@@ -943,19 +1017,20 @@ async def get_question_feedback(question_id: str):
         logger.error(f"Get feedback error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/users/me/favorites", summary="获取我的收藏列表")
 async def get_favorites():
     """
     获取收藏的题目列表（带完整题目信息）
     """
     try:
-        favorite_ids = feedback_service.get_favorites()
+        favorite_ids = await run_sync(feedback_service.get_favorites)
 
         if not favorite_ids:
             return {"questions": [], "total": 0}
 
         # 获取所有题目
-        all_questions = vector_service.get_all()
+        all_questions = await run_sync(vector_service.get_all)
         favorites = [q for q in all_questions if q['id'] in favorite_ids]
 
         return {
@@ -967,13 +1042,14 @@ async def get_favorites():
         logger.error(f"Get favorites error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.delete("/api/users/me/favorites/{question_id}", summary="取消收藏")
 async def remove_from_favorites(question_id: str):
     """
     从收藏中移除题目
     """
     try:
-        success = feedback_service.remove_from_collection(question_id, 'favorite')
+        success = await run_sync(feedback_service.remove_from_collection, question_id, 'favorite')
 
         if not success:
             raise HTTPException(status_code=500, detail="操作失败")
@@ -986,19 +1062,20 @@ async def remove_from_favorites(question_id: str):
         logger.error(f"Remove from favorites error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/users/me/wrong-books", summary="获取我的错题本")
 async def get_wrong_book():
     """
     获取错题本中的题目列表（带完整题目信息）
     """
     try:
-        wrong_book_ids = feedback_service.get_wrong_book()
+        wrong_book_ids = await run_sync(feedback_service.get_wrong_book)
 
         if not wrong_book_ids:
             return {"questions": [], "total": 0}
 
         # 获取所有题目
-        all_questions = vector_service.get_all()
+        all_questions = await run_sync(vector_service.get_all)
         wrong_books = [q for q in all_questions if q['id'] in wrong_book_ids]
 
         return {
@@ -1010,13 +1087,14 @@ async def get_wrong_book():
         logger.error(f"Get wrong book error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.delete("/api/users/me/wrong-books/{question_id}", summary="从错题本移除")
 async def remove_from_wrong_book(question_id: str):
     """
     从错题本中移除题目
     """
     try:
-        success = feedback_service.remove_from_collection(question_id, 'wrong_book')
+        success = await run_sync(feedback_service.remove_from_collection, question_id, 'wrong_book')
 
         if not success:
             raise HTTPException(status_code=500, detail="操作失败")
@@ -1029,13 +1107,14 @@ async def remove_from_wrong_book(question_id: str):
         logger.error(f"Remove from wrong book error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/system/weights/update", summary="手动更新权重")
 async def update_weights():
     """
     手动触发权重更新任务（基于艾宾浩斯曲线）
     """
     try:
-        updated_count = feedback_service.update_all_weights()
+        updated_count = await run_sync(feedback_service.update_all_weights)
 
         return {
             "status": "success",
@@ -1047,6 +1126,7 @@ async def update_weights():
         logger.error(f"Update weights error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/questions", summary="获取所有面试题")
 async def get_all_questions(
         limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0)
@@ -1055,7 +1135,8 @@ async def get_all_questions(
     获取所有面试题列表（分页）
     """
     try:
-        all_questions = vector_service.get_all()
+        # 获取所有题目
+        all_questions = await run_sync(vector_service.get_all)
 
         # 简单分页
         total = len(all_questions)
@@ -1071,6 +1152,7 @@ async def get_all_questions(
     except Exception as e:
         logger.error(f"Get all questions error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/debug/vector-status", summary="调试：查看向量数据库状态")
 async def debug_vector_status():
@@ -1117,6 +1199,7 @@ async def debug_vector_status():
         logger.error(f"Debug vector status error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/debug/reset-index", summary="调试：重置向量索引")
 async def reset_vector_index():
     """
@@ -1147,6 +1230,7 @@ async def reset_vector_index():
     except Exception as e:
         logger.error(f"Reset index error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/debug/merge-duplicates", summary="调试：合并重复问题")
 async def merge_duplicate_questions(
@@ -1270,6 +1354,7 @@ async def merge_duplicate_questions(
         logger.error(f"Merge duplicates error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/crawl/single-page", summary="智能爬取单个页面")
 async def crawl_single_page(url: str):
     """
@@ -1288,11 +1373,11 @@ async def crawl_single_page(url: str):
 
         # 1. 扫描页面
         logger.info("步骤1: 正在扫描页面...")
-        
+
         # 从配置中读取 Firecrawl 设置
         from app.config.crawler_config import get_config_from_env
         crawler_config = get_config_from_env()
-        
+
         scanner = URLScanner(
             timeout=crawler_config.timeout,
             follow_redirects=crawler_config.follow_redirects,
@@ -1382,6 +1467,7 @@ async def crawl_single_page(url: str):
         logger.error(f"单页爬取失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/crawl/single-page/stream", summary="单页爬取实时日志流")
 async def crawl_single_page_stream(url: str):
     """
@@ -1430,7 +1516,7 @@ async def crawl_single_page_stream(url: str):
                     # 1. 扫描页面
                     from app.config.crawler_config import get_config_from_env
                     crawler_config = get_config_from_env()
-                    
+
                     scanner = URLScanner(
                         timeout=crawler_config.timeout,
                         follow_redirects=crawler_config.follow_redirects,
@@ -1628,6 +1714,7 @@ async def crawl_single_page_stream(url: str):
         }
     )
 
+
 @app.get("/api/config", summary="获取爬虫配置")
 async def get_crawler_config():
     """
@@ -1648,6 +1735,7 @@ async def get_crawler_config():
     except Exception as e:
         logger.error(f"获取配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.put("/api/config", summary="更新爬虫配置")
 async def update_crawler_config(config_data: Dict[str, Any]):
@@ -1674,6 +1762,7 @@ async def update_crawler_config(config_data: Dict[str, Any]):
         logger.error(f"更新配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/scheduler-config", summary="获取定时任务配置")
 async def get_scheduler_config_api():
     """
@@ -1688,6 +1777,7 @@ async def get_scheduler_config_api():
     except Exception as e:
         logger.error(f"获取定时配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.put("/api/scheduler-config", summary="更新定时任务配置")
 async def update_scheduler_config(hour: int, minute: int):
@@ -1710,6 +1800,7 @@ async def update_scheduler_config(hour: int, minute: int):
     except Exception as e:
         logger.error(f"更新定时配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.put("/api/llm-config", summary="更新模型配置")
 async def update_llm_config(config_data: Dict[str, Any]):
@@ -1757,6 +1848,7 @@ async def update_llm_config(config_data: Dict[str, Any]):
 # Redis配置API已移除 - Redis运行在Docker容器内，使用固定的 redis://redis:6379
 # 如需从宿主机访问，可在 .env 中修改 REDIS_PORT
 
+
 @app.put("/api/email-config", summary="更新邮件配置")
 async def update_email_config(config_data: Dict[str, Any]):
     """
@@ -1797,6 +1889,7 @@ async def update_email_config(config_data: Dict[str, Any]):
     except Exception as e:
         logger.error(f"更新邮件配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/test-email", summary="测试邮件发送")
 async def test_email():
@@ -1841,6 +1934,7 @@ async def test_email():
         logger.error(f"测试邮件发送失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"邮件发送失败: {str(e)}")
 
+
 @app.put("/api/rerank-config", summary="更新 Rerank 配置")
 async def update_rerank_config(config_data: Dict[str, Any]):
     """
@@ -1877,6 +1971,7 @@ async def update_rerank_config(config_data: Dict[str, Any]):
     except Exception as e:
         logger.error(f"更新 Rerank 配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/system-config", summary="获取系统配置")
 async def get_system_config():
@@ -1956,6 +2051,7 @@ SCHEDULER_MINUTE = scheduler_config["minute"]
 
 # 添加定时任务：每天指定时间执行
 
+
 @scheduler.scheduled_job(CronTrigger(hour=SCHEDULER_HOUR, minute=SCHEDULER_MINUTE))
 def scheduled_crawl():
     """
@@ -1964,6 +2060,8 @@ def scheduled_crawl():
     run_crawler()
 
 # 添加定时任务：每天凌晨2点更新题目权重
+
+
 @scheduler.scheduled_job(CronTrigger(hour=2, minute=0))
 def scheduled_update_weights():
     """
@@ -1975,6 +2073,7 @@ def scheduled_update_weights():
         logger.info(f"权重更新完成: 更新了 {updated_count} 个题目")
     except Exception as e:
         logger.error(f"定时权重更新任务失败: {str(e)}")
+
 
 if __name__ == "__main__":
     # 启动定时任务调度器

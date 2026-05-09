@@ -7,20 +7,17 @@
             <h1 style="color: white; margin: 0; font-size: 1.2rem;">🎯 Interview AI</h1>
           </div>
           <a-menu
-            v-model:selectedKeys="selectedKeys"
-            theme="dark"
-            mode="horizontal"
-            :style="{ lineHeight: '64px' }"
-            class="desktop-menu"
+              v-model:selectedKeys="selectedKeys"
+              theme="dark"
+              mode="horizontal"
+              :style="{ lineHeight: '64px' }"
+              class="desktop-menu"
           >
             <a-menu-item key="/">
               <router-link to="/">首页</router-link>
             </a-menu-item>
             <a-menu-item key="/crawler">
               <router-link to="/crawler">爬虫管理</router-link>
-            </a-menu-item>
-            <a-menu-item key="/questions">
-              <router-link to="/questions">面试题生成</router-link>
             </a-menu-item>
             <a-menu-item key="/favorites">
               <router-link to="/favorites">我的收藏</router-link>
@@ -30,32 +27,29 @@
             </a-menu-item>
           </a-menu>
           <div class="mobile-menu-toggle" @click="toggleMobileMenu">
-            <MenuOutlined />
+            <MenuOutlined/>
           </div>
         </a-layout-header>
-        
+
         <!-- Mobile Menu Drawer -->
         <a-drawer
-          v-model:open="mobileMenuVisible"
-          title="菜单"
-          placement="right"
-          :width="250"
-          class="mobile-drawer"
+            v-model:open="mobileMenuVisible"
+            title="菜单"
+            placement="right"
+            :width="250"
+            class="mobile-drawer"
         >
           <a-menu
-            v-model:selectedKeys="selectedKeys"
-            theme="light"
-            mode="inline"
-            @click="handleMobileMenuClick"
+              v-model:selectedKeys="selectedKeys"
+              theme="light"
+              mode="inline"
+              @click="handleMobileMenuClick"
           >
             <a-menu-item key="/">
               <router-link to="/">首页</router-link>
             </a-menu-item>
             <a-menu-item key="/crawler">
               <router-link to="/crawler">爬虫管理</router-link>
-            </a-menu-item>
-            <a-menu-item key="/questions">
-              <router-link to="/questions">面试题生成</router-link>
             </a-menu-item>
             <a-menu-item key="/favorites">
               <router-link to="/favorites">我的收藏</router-link>
@@ -65,13 +59,14 @@
             </a-menu-item>
           </a-menu>
         </a-drawer>
-        
+
         <a-layout-content style="padding: 0; background: #ffffff; overflow-y: auto; -webkit-overflow-scrolling: touch;">
-          <router-view />
+          <router-view/>
         </a-layout-content>
-        
-        <a-layout-footer style="text-align: center; background: #ffffff; padding: 12px 24px; height: 48px; line-height: 24px; color: #8c8c8c; border-top: 1px solid #f0f0f0;">
-          Interview AI Agent ©2024 - 智能面试题管理系统
+
+        <a-layout-footer
+            style="text-align: center; background: #ffffff; padding: 12px 24px; height: 48px; line-height: 24px; color: #8c8c8c; border-top: 1px solid #f0f0f0;">
+          Interview AI Agent ©{{ copyrightYear }} - 智能面试题管理系统
         </a-layout-footer>
       </a-layout>
     </div>
@@ -79,14 +74,19 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import {computed, ref, watch} from 'vue'
+import {useRoute} from 'vue-router'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
-import { MenuOutlined } from '@ant-design/icons-vue'
+import {MenuOutlined} from '@ant-design/icons-vue'
 
 const route = useRoute()
 const selectedKeys = ref([route.path])
 const mobileMenuVisible = ref(false)
+
+const currentYear = new Date().getFullYear()
+const copyrightYear = computed(() => {
+  return currentYear > 2026 ? `2026-${currentYear}` : '2026'
+})
 
 watch(() => route.path, (newPath) => {
   selectedKeys.value = [newPath]
@@ -136,21 +136,21 @@ html, body {
   .desktop-menu {
     display: none;
   }
-  
+
   .mobile-menu-toggle {
     display: block;
     margin-left: auto; /* 推到最右边 */
   }
-  
+
   .logo {
     margin-right: 0; /* 移除右侧边距 */
     flex: 1; /* 占据剩余空间 */
   }
-  
+
   .logo h1 {
     font-size: 1rem;
   }
-  
+
   .header {
     padding: 0 12px;
     justify-content: space-between; /* logo 和菜单分列两侧 */

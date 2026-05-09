@@ -1,73 +1,51 @@
 <template>
   <div class="home-view">
-    <!-- 搜索区域 -->
-    <div class="search-container">
-      <transition name="fade">
-        <div v-if="!hasSearched" class="hero-image">
-          <svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" style="stop-color:#4096ff;stop-opacity:1" />
-                <stop offset="100%" style="stop-color:#69c0ff;stop-opacity:1" />
-              </linearGradient>
-            </defs>
-            <!-- 搜索图标 -->
-            <circle cx="70" cy="60" r="25" fill="none" stroke="url(#grad1)" stroke-width="3"/>
-            <line x1="88" y1="78" x2="105" y2="95" stroke="url(#grad1)" stroke-width="3" stroke-linecap="round"/>
-            <!-- 装饰元素 -->
-            <circle cx="140" cy="40" r="8" fill="#4096ff" opacity="0.3"/>
-            <circle cx="160" cy="70" r="5" fill="#69c0ff" opacity="0.4"/>
-            <circle cx="130" cy="90" r="6" fill="#4096ff" opacity="0.2"/>
-            <!-- 文档图标 -->
-            <rect x="135" y="30" width="20" height="25" rx="2" fill="none" stroke="#4096ff" stroke-width="2" opacity="0.5"/>
-            <line x1="140" y1="38" x2="150" y2="38" stroke="#4096ff" stroke-width="1.5" opacity="0.5"/>
-            <line x1="140" y1="43" x2="150" y2="43" stroke="#4096ff" stroke-width="1.5" opacity="0.5"/>
-            <line x1="140" y1="48" x2="147" y2="48" stroke="#4096ff" stroke-width="1.5" opacity="0.5"/>
-          </svg>
-        </div>
-      </transition>
-      
-      <a-input
-        v-model:value="searchQuery"
-        placeholder="搜索面试题..."
-        size="large"
-        allow-clear
-        @keyup.enter="handleSearch"
-        class="search-input"
-      >
-        <template #prefix>
-          <SearchOutlined />
-        </template>
-        <template #suffix>
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <a-segmented
-              v-model:value="searchMode"
-              :options="searchModeOptions"
-              size="small"
-              style="margin-right: 8px;"
-            />
-            <a-button type="primary" @click="handleSearch" :loading="searching">
+    <!-- 顶部搜索区 -->
+    <div class="top-section">
+      <!-- 搜索框 -->
+      <div class="search-container">
+        <a-input
+          v-model:value="searchQuery"
+          :placeholder="!hasSearched ? '输入关键词搜索面试题（留空查看推荐）' : '搜索面试题...'"
+          size="large"
+          allow-clear
+          @keyup.enter="handleSearchOrRecommend"
+          class="search-input"
+        >
+          <template #suffix>
+            <a-button type="primary" @click="handleSearchOrRecommend" :loading="loading">
               搜索
             </a-button>
-          </div>
-        </template>
-      </a-input>
+          </template>
+        </a-input>
+      </div>
     </div>
 
-    <!-- 搜索结果 -->
-    <div v-if="searchResults.length > 0" class="results-container">
+    <!-- 题目列表 -->
+    <div class="results-container">
       <QuestionList
-        :questions="searchResults"
-        :pagination="true"
-        :page-size="5"
+        :questions="displayQuestions"
+        :pagination="false"
         @item-click="showQuestionDetail"
+      />
+    </div>
+
+    <!-- 分页组件（放在列表下方） -->
+    <div v-if="hasSearched && searchResults.length > 10" class="pagination-container">
+      <a-pagination
+        v-model:current="currentPage"
+        :total="searchResults.length"
+        :page-size="10"
+        show-size-changer
+        :show-total="(total) => `共 ${total} 条结果`"
+        @change="handlePageChange"
       />
     </div>
 
     <!-- 空状态提示 -->
     <a-empty 
-      v-else-if="hasSearched" 
-      description="没有找到相关的面试题，请尝试其他关键词" 
+      v-if="!loading && displayQuestions.length === 0 && !hasSearched" 
+      description="正在为您智能推荐面试题..." 
       class="empty-state"
     />
 
@@ -76,6 +54,7 @@
       v-model="detailModalVisible"
       :question="currentQuestion"
       :index="currentIndex"
+      @feedback-changed="handleFeedbackChanged"
     />
 
     <!-- 页脚统计信息 -->
@@ -89,10 +68,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { questionApi, crawlerApi } from '../services'
 import { message } from 'ant-design-vue'
-import { SearchOutlined } from '@ant-design/icons-vue'
 import QuestionList from '../components/QuestionList.vue'
 import QuestionDetailModal from '../components/QuestionDetailModal.vue'
 
@@ -101,20 +79,74 @@ const lastCrawlTime = ref('')
 
 // 搜索相关
 const searchQuery = ref('')
-const searching = ref(false)
+const loading = ref(false)
 const searchResults = ref([])
 const hasSearched = ref(false)
-const searchMode = ref('hybrid') // semantic | exact | hybrid
-const searchModeOptions = [
-  { label: '语义', value: 'semantic' },
-  { label: '精确', value: 'exact' },
-  { label: '混合', value: 'hybrid' }
-]
+const currentPage = ref(1)
+const pageSize = 10
+
+// 分页后的显示数据
+const displayQuestions = computed(() => {
+  if (!hasSearched.value) {
+    return recommendedQuestions.value
+  }
+  // 搜索模式：根据当前页切片
+  const start = (currentPage.value - 1) * pageSize
+  const end = start + pageSize
+  return searchResults.value.slice(start, end)
+})
+
+// 显示的全局索引偏移（保留用于其他可能用途）
+const currentIndexOffset = computed(() => {
+  return hasSearched.value ? (currentPage.value - 1) * pageSize : 0
+})
+
+// 推荐相关
+const recommendedQuestions = ref([])
 
 // 模态框相关
 const detailModalVisible = ref(false)
 const currentQuestion = ref(null)
 const currentIndex = ref(0)
+
+// 键盘导航
+const handleKeydown = (e) => {
+  // 只在模态框打开时响应
+  if (!detailModalVisible.value) return
+  
+  // 如果用户在输入框中，不拦截按键
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+  
+  const list = displayQuestions.value
+  if (list.length === 0) return
+  
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    // 上一题
+    const newIndex = (currentIndex.value - 1 + list.length) % list.length
+    currentIndex.value = newIndex
+    currentQuestion.value = list[newIndex]
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    // 下一题
+    const newIndex = (currentIndex.value + 1) % list.length
+    currentIndex.value = newIndex
+    currentQuestion.value = list[newIndex]
+  }
+}
+
+// 监听模态框状态变化，动态添加/移除键盘事件
+watch(detailModalVisible, (visible) => {
+  if (visible) {
+    window.addEventListener('keydown', handleKeydown)
+  } else {
+    window.removeEventListener('keydown', handleKeydown)
+  }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
+})
 
 // 加载统计数据
 const loadStats = async () => {
@@ -133,24 +165,59 @@ const loadStats = async () => {
   }
 }
 
-// 处理搜索
-const handleSearch = async () => {
+// 加载推荐题目（最多10条）
+const loadRecommendedQuestions = async () => {
+  loading.value = true
+  hasSearched.value = false
+  
+  try {
+    const res = await questionApi.getRecommendedQuestions(
+      10,  // 固定返回10条
+      true,  // 排除已掌握的题目
+      true   // 自动启用 Rerank（后端会自动降级）
+    )
+    
+    if (res.questions) {
+      recommendedQuestions.value = res.questions
+      
+      if (res.total === 0) {
+        message.info('所有题目都已掌握，太棒了！')
+      } else {
+        const rerankStatus = res.rerank_used ? '（已使用 Rerank 优化排序）' : ''
+        console.log(`推荐了 ${res.total} 道题目${rerankStatus}`)
+      }
+    }
+  } catch (error) {
+    message.error('获取推荐题目失败')
+    console.error(error)
+  } finally {
+    loading.value = false
+  }
+}
+
+// 处理搜索或推荐（根据搜索框是否为空决定）
+const handleSearchOrRecommend = async () => {
+  // 如果搜索框为空，切换到推荐模式
   if (!searchQuery.value.trim()) {
+    await loadRecommendedQuestions()
     return
   }
 
-  searching.value = true
+  // 否则执行搜索
+  loading.value = true
   hasSearched.value = true
   searchResults.value = []
+  currentPage.value = 1 // 重置页码
 
   try {
     const res = await questionApi.searchQuestions(
       searchQuery.value,
-      10,
+      100,  // 不限制数量，搜到多少是多少
       undefined, // tags
       undefined, // difficulty
       undefined, // category
-      searchMode.value // search_mode
+      'hybrid', // 固定使用混合搜索
+      true // 自动启用 Rerank（后端会自动降级）
     )
     
     searchResults.value = res.results || []
@@ -158,30 +225,47 @@ const handleSearch = async () => {
     if (searchResults.value.length === 0) {
       message.info('没有找到相关的面试题')
     } else {
-      const modeText = {
-        'semantic': '语义',
-        'exact': '精确',
-        'hybrid': '混合'
-      }
-      message.success(`找到 ${searchResults.value.length} 个结果（${modeText[searchMode.value]}搜索）`)
+      message.success(`找到 ${searchResults.value.length} 个结果`)
     }
   } catch (error) {
     message.error('搜索失败')
     console.error(error)
   } finally {
-    searching.value = false
+    loading.value = false
   }
 }
 
-// 显示题目详情
-const showQuestionDetail = (index) => {
-  currentIndex.value = index
-  currentQuestion.value = searchResults.value[index]
+// 处理页码变化
+const handlePageChange = (page) => {
+  currentPage.value = page
+}
+
+// 显示题目详情（直接使用当前页的数据）
+const showQuestionDetail = (pageIndex) => {
+  currentIndex.value = pageIndex
+  currentQuestion.value = displayQuestions.value[pageIndex]
   detailModalVisible.value = true
+}
+
+// 处理反馈变化（收藏/错题本）
+const handleFeedbackChanged = async ({ questionId, type, value }) => {
+  console.log('反馈变化:', { questionId, type, value })
+  
+  // 在全部搜索结果中查找并更新
+  const question = searchResults.value.find(q => q.id === questionId)
+  if (question) {
+    if (type === 'favorite') {
+      question.is_favorite = value
+    } else if (type === 'wrong_book') {
+      question.is_wrong_book = value
+    }
+  }
 }
 
 onMounted(() => {
   loadStats()
+  // 页面加载时自动获取推荐题目
+  loadRecommendedQuestions()
 })
 </script>
 
@@ -201,17 +285,15 @@ onMounted(() => {
     padding: 8px;
     height: calc(100vh - 56px - 40px);
   }
-  
-  .hero-image svg {
-    width: 120px;
-    height: 75px;
-  }
+}
+
+.top-section {
+  flex-shrink: 0;
+  margin-bottom: 16px;
+  width: 100%;
 }
 
 .search-container {
-  flex-shrink: 0;
-  margin-bottom: 24px;
-  padding: 0 8px;
   width: 100%;
   text-align: center;
 }
@@ -243,26 +325,11 @@ onMounted(() => {
   background: #bfbfbf;
 }
 
-.hero-image {
-  margin-bottom: 24px;
+.empty-state {
+  flex: 1;
   display: flex;
+  align-items: center;
   justify-content: center;
-}
-
-.hero-image svg {
-  width: 160px;
-  height: 100px;
-}
-
-/* 淡入淡出动画 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 
 .search-input :deep(.ant-input-affix-wrapper) {
@@ -288,7 +355,7 @@ onMounted(() => {
 }
 
 .footer {
-  margin-top: 24px;
+  margin-top: 16px;
   padding: 16px 0;
   text-align: center;
   color: #8c8c8c;
