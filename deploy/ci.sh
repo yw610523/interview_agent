@@ -119,7 +119,7 @@ cd "$SCRIPT_DIR"
 log_info "✅ Firecrawl Submodule 准备完成"
 
 # 步骤 3: 构建并启动 Firecrawl(使用 firecrawl-manage.sh)
-log_info "步骤 3: 构建并启动 Firecrawl..."
+log_info "步骤 3: 检查并启动 Firecrawl..."
 
 # 检查 manage 脚本是否存在
 MANAGE_SCRIPT="${SCRIPT_DIR}/firecrawl-manage.sh"
@@ -131,11 +131,38 @@ fi
 # 切换到项目根目录再执行 firecrawl-manage.sh（确保子模块路径正确）
 cd "$PROJECT_DIR"
 
-# 使用 manage 脚本构建和启动
-log_info "使用 firecrawl-manage.sh 构建 Firecrawl..."
-bash "$MANAGE_SCRIPT" build
+# 智能检测：检查 Firecrawl 是否需要重新构建
+NEED_REBUILD=false
 
-log_info "启动 Firecrawl 服务..."
+# 1. 检查容器是否运行
+if docker compose -f "${PROJECT_DIR}/submodules/firecrawl/docker-compose.yaml" ps api | grep -q "Up"; then
+    log_info "✅ Firecrawl 容器正在运行"
+    
+    # 2. 检查 submodule 是否有未提交的更改
+    cd "${PROJECT_DIR}/submodules/firecrawl"
+    if git status --porcelain | grep -q .; then
+        log_warn "⚠️  Firecrawl 源码有未提交更改，需要重新构建"
+        NEED_REBUILD=true
+    else
+        log_info "✅ Firecrawl 源码无更改"
+    fi
+    cd "$PROJECT_DIR"
+else
+    log_warn "⚠️  Firecrawl 容器未运行，需要构建和启动"
+    NEED_REBUILD=true
+fi
+
+# 根据检测结果决定是否构建
+if [ "$NEED_REBUILD" = true ]; then
+    log_info "开始构建 Firecrawl 镜像..."
+    bash "$MANAGE_SCRIPT" build
+    log_info "✅ Firecrawl 构建完成"
+else
+    log_info "⏭️  跳过 Firecrawl 构建（容器运行中且代码无变化）"
+fi
+
+# 启动 Firecrawl 服务（如果已运行则无影响）
+log_info "确保 Firecrawl 服务运行..."
 bash "$MANAGE_SCRIPT" start
 
 # 返回 deploy 目录
