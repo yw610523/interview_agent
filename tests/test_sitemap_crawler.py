@@ -49,11 +49,12 @@ class TestCrawlerConfig:
             'max_urls': 50,
             'delay_between_requests': 1.0,
         }
-        config_file = tmp_path / 'test_config.json'
+        config_file = tmp_path / 'test_config.yaml'
+        import yaml
         with open(config_file, 'w') as f:
-            json.dump(config_data, f)
+            yaml.dump(config_data, f)
 
-        config = CrawlerConfig.from_json(str(config_file))
+        config = CrawlerConfig.from_yaml(str(config_file))
         assert config.sitemap_url == 'https://example.com/sitemap.xml'
         assert config.timeout == 60
         assert config.max_urls == 50

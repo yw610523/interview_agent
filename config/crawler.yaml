@@ -1,0 +1,84 @@
+# ============================================================
+# 爬虫配置 (Crawler Configuration)
+# ============================================================
+# 控制网站爬取行为的各项参数
+# ============================================================
+
+# --- 基本爬取设置 ---
+
+# Sitemap URL：要爬取的网站 sitemap 地址
+# 支持完整 URL 或域名（会自动补全为 https://domain/sitemap.xml）
+sitemap_url: javaguide.com
+
+# 网站根路径前缀（Root URL）：
+# - 用于子目录部署的网站（如 WordPress、博客系统）
+# - 示例：/blog, /docs, /wiki
+# - 空字符串表示网站部署在根目录
+# - 会影响 sitemap 和 robots.txt 的路径拼接
+root_url: ''
+
+# Sitemap 文件路径：相对于 root_url 的 sitemap 位置
+# 默认：/sitemap.xml
+# 如果 root_url 为 /blog，则实际路径为 /blog/sitemap.xml
+sitemap_path: /sitemap.xml
+
+# Robots.txt 文件路径：
+# ⚠️ 注意：robots.txt 始终在网站根目录，不受 root_url 影响
+# 例如：即使 root_url=/blog，robots.txt 仍在 /robots.txt
+robots_path: /robots.txt
+
+# 请求超时时间（秒）：单个页面加载的最大等待时间
+timeout: 31
+
+# 最大爬取 URL 数量：null 表示不限制
+max_urls:
+
+# 请求间隔（秒）：两次请求之间的延迟，避免对服务器造成压力
+delay_between_requests: 0.5
+
+# --- 输出设置 ---
+
+# 输出目录：爬取结果保存的文件夹路径
+output_dir: ./crawl_results
+
+# 是否保存原始 HTML 文件到磁盘
+save_results: true
+
+# 是否显示详细日志信息
+verbose: true
+
+# --- HTTP 请求设置 ---
+
+# User-Agent：模拟的浏览器标识
+user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
+  like Gecko) Chrome/120.0.0.0 Safari/537.36
+
+# 是否跟随 HTTP 重定向（301/302）
+follow_redirects: true
+
+# 是否验证 SSL 证书
+verify_ssl: true
+
+# 最大内容长度（字节）：单页内容的上限，默认 10MB
+max_content_length: 10485760
+
+# --- Robots.txt 设置 ---
+
+# 是否检查 robots.txt 协议，遵守网站的爬取规则
+check_robots_txt: true
+
+# --- Firecrawl 集成设置 ---
+
+# 是否启用 Firecrawl 服务（用于 JavaScript 渲染页面的爬取）
+# 详细的 Firecrawl 配置请在 firecrawl.yaml 中设置
+use_firecrawl: false
+
+# --- URL 过滤规则 ---
+
+# URL 包含模式：只爬取匹配这些模式的 URL（空列表表示不过滤）
+# 示例：['/docs/*', '/api/*']
+url_include_patterns: []
+
+# URL 排除模式：跳过匹配这些模式的 URL
+# 示例：['/admin/*', '/private/*']
+url_exclude_patterns: []

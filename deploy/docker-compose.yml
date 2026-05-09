@@ -6,8 +6,8 @@ services:
     image: redis/redis-stack:latest
     container_name: interview-redis
     ports:
-      - "${REDIS_PORT:-6379}:6379"
-      - "${REDIS_INSIGHT_PORT:-8001}:8001"  # RedisInsight
+      - "6379:6379"
+      - "8001:8001"  # RedisInsight
     volumes:
       - redis-data:/data
     environment:
@@ -22,14 +22,24 @@ services:
     container_name: interview-agent
     ports:
       - "${APP_PORT:-9023}:9023"  # 前端访问端口
-    env_file:
-      - ../.env
     depends_on:
       - redis
     networks:
       - interview-network
     volumes:
       - ./crawl_results:/app/crawl_results
+      # 配置文件映射（只读）- 支持多文件配置
+      - ../config/crawler.yaml:/app/config/crawler.yaml:ro
+      - ../config/llm.yaml:/app/config/llm.yaml:ro
+      - ../config/smtp.yaml:/app/config/smtp.yaml:ro
+      - ../config/redis.yaml:/app/config/redis.yaml:ro
+      - ../config/firecrawl.yaml:/app/config/firecrawl.yaml:ro
+      - ../config/rerank.yaml:/app/config/rerank.yaml:ro
+      - ../config/content.yaml:/app/config/content.yaml:ro
+      - ../config/prompts.yaml:/app/config/prompts.yaml:ro
+      - ../config/service.yaml:/app/config/service.yaml:ro
+      # 兼容模式：如果存在 config.yaml 也映射（可选）
+      - ../config.yaml:/app/config.yaml:ro
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "wget", "-qO-", "http://localhost:9023/" ]

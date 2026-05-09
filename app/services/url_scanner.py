@@ -438,7 +438,7 @@ class URLScanner:
         return results
 
     def check_robots_txt(
-            self, base_url: str, robots_path: str = "/robots.txt"
+            self, base_url: str, robots_path: str = "/robots.txt", root_url: str = ""
     ) -> Optional[str]:
         """
         获取并返回域名的 robots.txt 内容。
@@ -446,13 +446,19 @@ class URLScanner:
         参数:
             base_url: 域名的基础 URL
             robots_path: robots.txt 的路径，默认为 /robots.txt
+            root_url: 网站根路径前缀（如 /blog），robots.txt 始终在网站根目录，不使用此参数
 
         返回:
             robots.txt 内容，如果未找到返回 None
+        
+        注意:
+            robots.txt 始终位于网站根目录（https://domain.com/robots.txt）
+            不受 root_url 影响。如果需要自定义路径，请使用 robots_path 参数。
         """
         parsed = urlparse(base_url)
         if not robots_path.startswith("/"):
             robots_path = "/" + robots_path
+        # robots.txt 始终在根目录，不拼接 root_url
         robots_url = f"{parsed.scheme}://{parsed.netloc}{robots_path}"
 
         try:

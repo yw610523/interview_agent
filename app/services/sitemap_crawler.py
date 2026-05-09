@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Any, Callable
 from urllib.parse import urlparse
 
 from app.config.crawler_config import CrawlerConfig
+from app.config.firecrawl_config import get_firecrawl_config
 from .sitemap_parser import SitemapParser
 from .url_filter import URLFilter
 from .url_scanner import URLScanner, ScanResult
@@ -78,11 +79,14 @@ class SitemapCrawler:
             return
 
         try:
+            # 从 firecrawl.yaml 读取详细配置
+            firecrawl_cfg = get_firecrawl_config()
+            
             firecrawl_config = {
-                "firecrawl_api_url": self.config.firecrawl_api_url,
-                "firecrawl_api_key": self.config.firecrawl_api_key,
-                "firecrawl_timeout": self.config.firecrawl_timeout,
-                "firecrawl_use_official": self.config.firecrawl_use_official,
+                "firecrawl_api_url": firecrawl_cfg.api_url,
+                "firecrawl_api_key": firecrawl_cfg.api_key,
+                "firecrawl_timeout": firecrawl_cfg.timeout,
+                "firecrawl_use_official": firecrawl_cfg.use_official,
             }
             self._firecrawl_service = FirecrawlMCPService.from_config(firecrawl_config)
 
@@ -117,10 +121,11 @@ class SitemapCrawler:
                 return result
 
             # 调用 Firecrawl 进行爬取
+            firecrawl_cfg = get_firecrawl_config()
             firecrawl_result = await self._firecrawl_service.scrape_url(
                 url=url,
                 formats=["markdown", "html"],
-                only_main_content=self.config.firecrawl_only_main_content,
+                only_main_content=firecrawl_cfg.only_main_content,
             )
 
             if firecrawl_result.success and firecrawl_result.markdown:
@@ -159,13 +164,19 @@ class SitemapCrawler:
     def _normalize_sitemap_url(self, url: str) -> str:
         """
         标准化站点地图 URL。
-        如果输入只是域名，自动补充 https 协议和配置的 sitemap 路径。
+        如果输入只是域名，自动补充 https 协议、root_url 和配置的 sitemap 路径。
 
         参数:
             url: 输入的 URL 或域名
 
         返回:
             标准化后的完整站点地图 URL
+        
+        示例:
+            - 输入: "example.com", root_url: "/blog"
+              输出: "https://example.com/blog/sitemap.xml"
+            - 输入: "example.com/docs", root_url: ""
+              输出: "https://example.com/docs/sitemap.xml"
         """
         url = url.strip()
 
@@ -173,13 +184,23 @@ class SitemapCrawler:
         if not url.startswith(('http://', 'https://')):
             url = f"https://{url}"
 
-        # 如果只是域名（没有路径），添加配置的 sitemap 路径
+        # 解析 URL
         parsed = urlparse(url)
+        
+        # 如果只是域名（没有路径），添加 root_url 和 sitemap 路径
         if not parsed.path or parsed.path == '/':
+            # 构建完整路径：root_url + sitemap_path
+            root_url = self.config.root_url.rstrip('/')
             sitemap_path = self.config.sitemap_path
+            
+            # 确保 sitemap_path 以 / 开头
             if not sitemap_path.startswith('/'):
                 sitemap_path = '/' + sitemap_path
-            url = f"{parsed.scheme}://{parsed.netloc}{sitemap_path}"
+            
+            # 拼接：root_url + sitemap_path
+            full_path = f"{root_url}{sitemap_path}" if root_url else sitemap_path
+            
+            url = f"{parsed.scheme}://{parsed.netloc}{full_path}"
 
         return url
 
@@ -276,17 +297,18 @@ class SitemapCrawler:
         self._init_firecrawl()
 
         # Initialize scanner first for robots.txt check
+        firecrawl_cfg = get_firecrawl_config()
         self._url_scanner = URLScanner(
             timeout=self.config.timeout,
             follow_redirects=self.config.follow_redirects,
             verify_ssl=self.config.verify_ssl,
             max_content_length=self.config.max_content_length,
             use_firecrawl=self.config.use_firecrawl,
-            firecrawl_api_url=self.config.firecrawl_api_url,
-            firecrawl_api_key=self.config.firecrawl_api_key,
-            firecrawl_timeout=self.config.firecrawl_timeout,
-            firecrawl_use_official=self.config.firecrawl_use_official,
-            firecrawl_only_main_content=self.config.firecrawl_only_main_content,
+            firecrawl_api_url=firecrawl_cfg.api_url,
+            firecrawl_api_key=firecrawl_cfg.api_key,
+            firecrawl_timeout=firecrawl_cfg.timeout,
+            firecrawl_use_official=firecrawl_cfg.use_official,
+            firecrawl_only_main_content=firecrawl_cfg.only_main_content,
         )
 
         # Check robots.txt first
@@ -406,17 +428,18 @@ class SitemapCrawler:
         # Initialize Firecrawl if enabled
         self._init_firecrawl()
 
+        firecrawl_cfg = get_firecrawl_config()
         self._url_scanner = URLScanner(
             timeout=self.config.timeout,
             follow_redirects=self.config.follow_redirects,
             verify_ssl=self.config.verify_ssl,
             max_content_length=self.config.max_content_length,
             use_firecrawl=self.config.use_firecrawl,
-            firecrawl_api_url=self.config.firecrawl_api_url,
-            firecrawl_api_key=self.config.firecrawl_api_key,
-            firecrawl_timeout=self.config.firecrawl_timeout,
-            firecrawl_use_official=self.config.firecrawl_use_official,
-            firecrawl_only_main_content=self.config.firecrawl_only_main_content,
+            firecrawl_api_url=firecrawl_cfg.api_url,
+            firecrawl_api_key=firecrawl_cfg.api_key,
+            firecrawl_timeout=firecrawl_cfg.timeout,
+            firecrawl_use_official=firecrawl_cfg.use_official,
+            firecrawl_only_main_content=firecrawl_cfg.only_main_content,
         )
 
         for i, url in enumerate(urls):

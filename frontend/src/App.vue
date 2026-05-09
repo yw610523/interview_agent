@@ -3,29 +3,30 @@
     <div id="app">
       <a-layout style="height: 100vh">
         <a-layout-header class="header">
-          <div class="logo">
-            <h1 style="color: white; margin: 0; font-size: 1.2rem;">🎯 Interview AI</h1>
+          <div class="header-left">
+            <router-link to="/" class="logo-link">
+              <div class="logo">
+                <h1 style="color: white; margin: 0; font-size: 1.2rem;">🎯 Interview AI</h1>
+              </div>
+            </router-link>
+            <a-menu
+                v-model:selectedKeys="selectedKeys"
+                theme="dark"
+                mode="horizontal"
+                :style="{ lineHeight: '42px' }"
+                class="desktop-menu"
+            >
+              <a-menu-item key="/crawler">
+                <router-link to="/crawler">爬虫管理</router-link>
+              </a-menu-item>
+              <a-menu-item key="/favorites">
+                <router-link to="/favorites">我的收藏</router-link>
+              </a-menu-item>
+            </a-menu>
           </div>
-          <a-menu
-              v-model:selectedKeys="selectedKeys"
-              theme="dark"
-              mode="horizontal"
-              :style="{ lineHeight: '64px' }"
-              class="desktop-menu"
-          >
-            <a-menu-item key="/">
-              <router-link to="/">首页</router-link>
-            </a-menu-item>
-            <a-menu-item key="/crawler">
-              <router-link to="/crawler">爬虫管理</router-link>
-            </a-menu-item>
-            <a-menu-item key="/favorites">
-              <router-link to="/favorites">我的收藏</router-link>
-            </a-menu-item>
-            <a-menu-item key="/settings">
-              <router-link to="/settings">系统设置</router-link>
-            </a-menu-item>
-          </a-menu>
+          <router-link to="/settings" class="settings-link">
+            <SettingOutlined style="color: white; font-size: 18px;"/>
+          </router-link>
           <div class="mobile-menu-toggle" @click="toggleMobileMenu">
             <MenuOutlined/>
           </div>
@@ -77,7 +78,7 @@
 import {computed, ref, watch} from 'vue'
 import {useRoute} from 'vue-router'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
-import {MenuOutlined} from '@ant-design/icons-vue'
+import {MenuOutlined, SettingOutlined} from '@ant-design/icons-vue'
 
 const route = useRoute()
 const selectedKeys = ref([route.path])
@@ -117,11 +118,40 @@ html, body {
 .header {
   display: flex;
   align-items: center;
-  padding: 0 24px;
+  justify-content: space-between;
+  padding: 0 !important;
+  height: 42px;
+  line-height: 42px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  flex: 1;
 }
 
 .logo {
-  margin-right: 48px;
+  margin-right: 0 !important;
+  padding-left: 8px;
+}
+
+.logo-link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.settings-link {
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  height: 42px;
+  transition: opacity 0.3s;
+  flex-shrink: 0;
+}
+
+.settings-link:hover {
+  opacity: 0.7;
 }
 
 .mobile-menu-toggle {

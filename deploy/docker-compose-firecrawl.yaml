@@ -1,0 +1,45 @@
+services:
+  api:
+    image: ${FIRECRAWL_REGISTRY}/firecrawl-api:${FIRECRAWL_VERSION}
+    container_name: firecrawl-api
+    restart: always
+    ports:
+      - "3002:3002"
+    depends_on:
+      - redis
+      - playwright-service
+
+  playwright-service:
+    image: ${FIRECRAWL_REGISTRY}/firecrawl-playwright-service:${FIRECRAWL_VERSION}
+    container_name: firecrawl-playwright-service
+    restart: always
+    ports:
+      - "3000:3000"
+
+  db:
+    image: ${FIRECRAWL_REGISTRY}/firecrawl-nuq-postgres:${FIRECRAWL_VERSION}
+    container_name: firecrawl-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-firecrawl}
+    volumes:
+      - firecrawl_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: ${FIRECRAWL_REGISTRY}/redis:${FIRECRAWL_VERSION}
+    container_name: firecrawl-redis
+    restart: always
+    command: redis-server --save 60 1 --loglevel warning
+
+  rabbitmq:
+    image: ${FIRECRAWL_REGISTRY}/rabbitmq:${FIRECRAWL_VERSION}
+    container_name: firecrawl-rabbitmq
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+volumes:
+  firecrawl_postgres_data:

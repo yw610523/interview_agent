@@ -63,13 +63,15 @@
               🔗 查看来源
             </a>
           </a-descriptions-item>
-          <a-descriptions-item v-if="question.importance_score" label="重要性评分">
-            <a-progress 
-              :percent="Math.round(question.importance_score * 100)" 
-              :stroke-color="{
-                '0%': '#108ee9',
-                '100%': '#87d068',
-              }"
+          <a-descriptions-item label="重要性评分">
+            <a-slider 
+              v-model:value="question.importance_score" 
+              :min="0" 
+              :max="1" 
+              :step="0.05"
+              :marks="{0: '0%', 0.25: '25%', 0.5: '50%', 0.75: '75%', 1: '100%'}"
+              @change="handleImportanceChange"
+              :disabled="submittingFeedback"
               style="width: 200px;"
             />
           </a-descriptions-item>
@@ -367,6 +369,33 @@ const handleMasteryChange = async (value) => {
   } finally {
     submittingFeedback.value = false
   }
+}
+
+// 处理重要性变化
+let importanceTimer = null
+const handleImportanceChange = async (value) => {
+  if (!props.question?.id) return
+  
+  // 防抖：延迟500ms后提交
+  clearTimeout(importanceTimer)
+  importanceTimer = setTimeout(async () => {
+    submittingFeedback.value = true
+    try {
+      await feedbackApi.updateImportance(props.question.id, value)
+      message.success('重要性已更新')
+      // 通知父组件刷新
+      emit('feedback-changed', {
+        questionId: props.question.id,
+        type: 'importance',
+        value: value
+      })
+    } catch (error) {
+      message.error('更新失败')
+      console.error(error)
+    } finally {
+      submittingFeedback.value = false
+    }
+  }, 500)
 }
 
 // 切换收藏状态

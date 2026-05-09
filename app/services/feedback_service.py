@@ -15,8 +15,6 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
-from dotenv import load_dotenv
-
 # 尝试导入 Redis
 try:
     import redis
@@ -26,7 +24,6 @@ except ImportError:
     REDIS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-load_dotenv()
 
 
 @dataclass
@@ -39,6 +36,7 @@ class QuestionFeedback:
     is_wrong_book: bool = False  # 是否在错题本
     hide_from_recommendation: bool = False  # 是否从推荐中隐藏（软删除）
     hidden_at: Optional[str] = None  # 隐藏时间（用于30天后自动恢复）
+    last_reviewed_at: Optional[str] = None  # 上次复习时间
     created_at: Optional[str] = None  # 创建时间
     updated_at: Optional[str] = None  # 更新时间
 
@@ -57,10 +55,13 @@ class FeedbackService:
     def _init_redis(self):
         """初始化 Redis 客户端"""
         try:
-            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+            from app.config.config_manager import config_manager
+            
+            # 从 config.yaml 读取 Redis 配置并构建 URL
+            redis_url = config_manager.get_redis_url()
             self.redis_client = redis.from_url(redis_url)
             self.redis_client.ping()
-            logger.info("FeedbackService: Redis 客户端初始化成功")
+            logger.info(f"FeedbackService: Redis 客户端初始化成功 ({redis_url})")
         except Exception as e:
             logger.error(f"FeedbackService: Redis 客户端初始化失败: {str(e)}")
 
@@ -68,27 +69,34 @@ class FeedbackService:
         """初始化 Rerank 客户端（复用 LLM 的配置）"""
         try:
             from openai import OpenAI
+            
+            # 导入统一配置管理器
+            from app.config.config_manager import config_manager
 
-            # 读取 Rerank 配置
-            self.rerank_enabled = os.getenv("RERANK_ENABLED", "false").lower() == "true"
-            self.rerank_model = os.getenv("RERANK_MODEL", "rerank-sf")
+            # 读取 Rerank 配置：优先从 config.yaml 读取
+            rerank_config = config_manager.get_rerank_config()
+            rerank_enabled = rerank_config.get('enabled', False)
+            if isinstance(rerank_enabled, str):
+                rerank_enabled = rerank_enabled.lower() in ('true', '1', 'yes')
+            self.rerank_enabled = rerank_enabled
+            self.rerank_model = rerank_config.get('model') or os.getenv("RERANK_MODEL", "rerank-sf")
 
             if not self.rerank_enabled:
                 logger.info("FeedbackService: Rerank 未启用")
                 return
 
             # 获取 Rerank API 配置，如果为空则复用 OpenAI 配置
-            rerank_api_key = os.getenv("RERANK_API_KEY", "").strip()
-            rerank_api_base = os.getenv("RERANK_API_URL", "").strip()
+            rerank_api_key = rerank_config.get('api_key') or os.getenv("RERANK_API_KEY", "").strip()
+            rerank_api_base = rerank_config.get('api_url') or os.getenv("RERANK_API_URL", "").strip()
 
             # 如果 Rerank 配置为空，复用 OpenAI 配置
             if not rerank_api_key:
-                rerank_api_key = os.getenv("OPENAI_API_KEY")
+                rerank_api_key = config_manager.get('llm.openai_api_key') or os.getenv("OPENAI_API_KEY")
                 logger.info("FeedbackService: Rerank API Key 未配置，复用 OPENAI_API_KEY")
 
             if not rerank_api_base:
                 # 如果 Rerank API URL 未配置，复用 OPENAI_API_BASE
-                rerank_api_base = os.getenv("OPENAI_API_BASE")
+                rerank_api_base = config_manager.get('llm.openai_api_base') or os.getenv("OPENAI_API_BASE")
                 logger.info("FeedbackService: Rerank API URL 未配置，复用 OPENAI_API_BASE")
 
             # 初始化客户端
@@ -121,8 +129,7 @@ class FeedbackService:
         
         规则:
         - level = int(importance_score / 0.2)  # 0.2 = 1/5，将0-1映射到0-5
-        - mastery_level == level: 弹窗询问
-        - mastery_level > level: 自动软删除
+        - mastery_level >= level: 弹窗询问（让用户决定是否隐藏）
         - mastery_level < level: 继续规划出现时间
         
         参数:
@@ -138,12 +145,9 @@ class FeedbackService:
         # 计算对应的级别阈值
         level_threshold = int(importance_score / 0.2) if importance_score >= 0.2 else 0
         
-        if mastery_level == level_threshold:
-            # 等于阈值时弹窗询问
+        if mastery_level >= level_threshold and mastery_level > 0:
+            # 达到或超过阈值时弹窗询问（但至少要有1级掌握）
             return {'should_hide': True, 'need_confirm': True}
-        elif mastery_level > level_threshold:
-            # 高于阈值时自动软删除
-            return {'should_hide': True, 'need_confirm': False}
         else:
             # 低于阈值时不处理
             return {'should_hide': False, 'need_confirm': False}

@@ -73,6 +73,16 @@ export const systemConfigApi = {
     return apiClient.put('/rerank-config', config)
   },
 
+  // 获取 Redis 配置
+  getRedisConfig() {
+    return apiClient.get('/redis-config')
+  },
+
+  // 更新 Redis 配置
+  updateRedisConfig(config) {
+    return apiClient.put('/redis-config', config)
+  },
+
   // 更新邮件配置
   updateEmailConfig(config) {
     return apiClient.put('/email-config', config)
@@ -81,6 +91,16 @@ export const systemConfigApi = {
   // 测试邮件发送
   testEmail() {
     return apiClient.post('/test-email')
+  },
+
+  // 获取内容处理配置
+  getContentConfig() {
+    return apiClient.get('/content-config')
+  },
+
+  // 更新内容处理配置
+  updateContentConfig(config) {
+    return apiClient.put('/content-config', config)
   }
 }
 
@@ -162,6 +182,11 @@ export const feedbackApi = {
     return apiClient.get(`/questions/${questionId}/feedback`)
   },
 
+  // 更新题目重要性
+  updateImportance(questionId, importanceScore) {
+    return apiClient.put(`/questions/${questionId}/importance?importance_score=${importanceScore}`)
+  },
+
   // 获取收藏列表
   getFavorites() {
     return apiClient.get('/users/me/favorites')
@@ -190,5 +215,18 @@ export const feedbackApi = {
   // 永久删除题目
   permanentlyDeleteQuestion(questionId) {
     return apiClient.delete(`/users/me/hidden-questions/${questionId}`)
+  }
+}
+
+// 提示词管理 API
+export const promptsApi = {
+  // 获取提示词配置
+  getPrompts() {
+    return apiClient.get('/prompts')
+  },
+
+  // 更新提示词配置
+  updatePrompts(prompts) {
+    return apiClient.post('/prompts', prompts)
   }
 }

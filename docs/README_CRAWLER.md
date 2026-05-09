@@ -6,7 +6,7 @@
 
 - **站点地图解析**: 支持标准站点地图 XML 和站点地图索引文件
 - **URL 扫描**: 提取内容、元数据、标题、链接、图片、脚本和样式表
-- **可配置**: 通过 CLI 参数、JSON 配置文件或环境变量进行灵活配置
+- **可配置**: 通过 CLI 参数、YAML/JSON 配置文件或环境变量进行灵活配置
 - **进度跟踪**: 实时进度回调和统计信息
 - **输出**: 将结果保存到 JSON 文件以供进一步分析
 - **Robots.txt 支持**: 爬取前自动检查 robots.txt，如禁止则终止爬取
@@ -46,8 +46,8 @@ python -m app.main_crawler \
     --delay 1.0 \
     --output-dir ./results
 
-# 使用指定配置文件
-python -m app.main_crawler --config app/config/crawler_config.json
+# 使用指定配置文件（支持 YAML 和 JSON）
+python -m app.main_crawler --config app/config/crawler_config.yaml
 ```
 
 ### CLI 选项
@@ -117,118 +117,50 @@ for url in urls:
 ```
 
 ## 配置文件
-# Sitemap 爬虫
 
-一个基于 Python 的网络爬虫，用于解析 XML 站点地图并扫描每个 URL 以提取内容、元数据和链接。
+支持 YAML 和 JSON 格式（优先使用 YAML）。
 
-## 功能特性
+### YAML 配置示例
 
-- **站点地图解析**: 支持标准站点地图 XML 和站点地图索引文件
-- **URL 扫描**: 提取内容、元数据、标题、链接、图片、脚本和样式表
-- **可配置**: 通过 CLI 参数、JSON 配置文件或环境变量进行灵活配置
-- **进度跟踪**: 实时进度回调和统计信息
-- **输出**: 将结果保存到 JSON 文件以供进一步分析
-- **Robots.txt 支持**: 自动检查 robots.txt 中的站点地图 URL
+创建 `app/config/crawler_config.yaml`：
 
-## 安装
+```yaml
+# 站点地图配置
+sitemap_url: "example.com"
+sitemap_path: "/sitemap.xml"
+robots_path: "/robots.txt"
 
-1. 安装依赖项：
-   ```bash
-   pip install -r requirements.txt
-   ```
+# 请求配置
+timeout: 30
+max_urls: null  # null 表示无限制
+delay_between_requests: 0.5
+user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+verify_ssl: true
+follow_redirects: true
+max_content_length: 10485760  # 10MB
 
-2. 爬虫需要以下包（已添加到 requirements.txt）：
-   - `requests` - HTTP 请求
-   - `beautifulsoup4` - HTML 解析
-   - `lxml` - XML 解析
+# 输出配置
+output_dir: "./crawl_results"
+save_results: true
+verbose: true
 
-## 使用方法
+# URL 过滤规则（正则表达式）
+url_include_patterns: []
+url_exclude_patterns: []
 
-### 命令行界面
+# robots.txt 检查
+check_robots_txt: true
 
-```bash
-# 基本用法
-python -m app.main_crawler --sitemap-url https://example.com/sitemap.xml
-
-# 带选项
-python -m app.main_crawler \
-    --sitemap-url https://example.com/sitemap.xml \
-    --max-urls 100 \
-    --timeout 60 \
-    --delay 1.0 \
-    --output-dir ./results
-
-# 使用配置文件
-python -m app.main_crawler --config app/config/crawler_config.json
+# Firecrawl MCP 配置
+use_firecrawl: false
+firecrawl_api_url: "http://host.docker.internal:3002"
+firecrawl_api_key: null
+firecrawl_timeout: 600
+firecrawl_use_official: false
+firecrawl_only_main_content: true
 ```
 
-### CLI 选项
-
-| 选项 | 描述 | 默认值 |
-|--------|-------------|---------|
-| `--sitemap-url, -u` | 要爬取的站点地图 URL | 必填 |
-| `--config, -c` | JSON 配置文件路径 | - |
-| `--timeout, -t` | 请求超时时间（秒） | 30 |
-| `--max-urls, -m` | 最大爬取 URL 数量 | 无限制 |
-| `--delay, -d` | 请求间隔时间（秒） | 0.5 |
-| `--no-ssl-verify` | 禁用 SSL 证书验证 | False |
-| `--no-follow-redirects` | 不跟随重定向 | False |
-| `--output-dir, -o` | 结果保存目录 | ./crawl_results |
-| `--no-save` | 不保存结果到文件 | False |
-| `--quiet, -q` | 禁用详细输出 | False |
-| `--verbose, -v` | 启用调试日志 | False |
-
-### Python API
-
-```python
-from app.services.sitemap_crawler import SitemapCrawler, CrawlConfig
-
-# 使用配置对象
-config = CrawlConfig(
-    sitemap_url="https://example.com/sitemap.xml",
-    timeout=30,
-    max_urls=100,
-    delay_between_requests=0.5,
-    output_dir="./crawl_results",
-)
-
-crawler = SitemapCrawler(config=config)
-results = crawler.crawl()
-
-# 打印摘要
-crawler.print_report()
-
-# 获取摘要字典
-summary = crawler.get_summary()
-
-# 保存结果
-crawler.save_results()
-```
-
-### 使用独立组件
-
-```python
-from app.services.sitemap_parser import SitemapParser
-from app.services.url_scanner import URLScanner
-
-# 解析站点地图
-parser = SitemapParser("https://example.com/sitemap.xml")
-parser.fetch_sitemap()
-urls = parser.parse()
-
-# 扫描单个 URL
-scanner = URLScanner(timeout=30)
-for url in urls:
-    result = scanner.scan(url)
-    print(f"URL: {result.url}")
-    print(f"状态: {result.status_code}")
-    print(f"标题: {result.title}")
-    print(f"链接: {len(result.links['internal'])} 内部链接, {len(result.links['external'])} 外部链接")
-```
-
-## 配置文件
-
-创建 JSON 配置文件：
+### JSON 配置示例（兼容旧版本）
 
 ```json
 {
@@ -338,7 +270,7 @@ interview_agent/
 │   ├── config/
 │   │   ├── __init__.py
 │   │   ├── crawler_config.py      # 配置管理
-│   │   └── crawler_config.json    # 默认配置
+│   │   └── crawler_config.yaml    # 默认配置（YAML）
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── sitemap_parser.py      # 站点地图 XML 解析器
@@ -447,7 +379,7 @@ interview_agent/
 │   ├── config/
 │   │   ├── __init__.py
 │   │   ├── crawler_config.py      # 配置管理
-│   │   └── crawler_config.json    # 默认配置
+│   │   └── crawler_config.yaml    # 默认配置（YAML）
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── sitemap_parser.py      # 站点地图 XML 解析器

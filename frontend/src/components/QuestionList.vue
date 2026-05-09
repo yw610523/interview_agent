@@ -15,6 +15,18 @@
               <div class="question-title">{{ item.title }}</div>
             </template>
           </a-list-item-meta>
+          
+          <!-- 永久删除按钮（仅在已掌握列表中显示） -->
+          <template v-if="showPermanentDelete" #actions>
+            <a-button 
+              type="link" 
+              danger 
+              size="small"
+              @click.stop="$emit('permanentDelete', item.id)"
+            >
+              永久删除
+            </a-button>
+          </template>
         </a-list-item>
       </template>
     </a-list>
@@ -35,10 +47,14 @@ defineProps({
   pageSize: {
     type: Number,
     default: 20
+  },
+  showPermanentDelete: {
+    type: Boolean,
+    default: false
   }
 })
 
-defineEmits(['itemClick'])
+defineEmits(['itemClick', 'permanentDelete'])
 </script>
 
 <style scoped>
@@ -51,6 +67,9 @@ defineEmits(['itemClick'])
   transition: all 0.3s;
   border-bottom: 1px solid #f0f0f0;
   padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .question-item:hover {

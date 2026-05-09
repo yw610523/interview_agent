@@ -78,11 +78,59 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest pytest-cov httpx
 
-      - name: Create .env file for tests
+      - name: Create config files for tests
         run: |
-          cp .env.template .env
-          echo "REDIS_URL=redis://localhost:6379" >> .env
-          echo "OPENAI_API_KEY=test-key" >> .env
+          mkdir -p config
+          # 创建最小化的测试配置
+          cat > config/redis.yaml << EOF
+          url: redis://localhost:6379
+          EOF
+          cat > config/llm.yaml << EOF
+          openai_api_key: test-key
+          openai_api_base: https://api.test.com
+          model: test-model
+          embedding_model: test-embedding
+          embedding_dimension: 1536
+          max_input_tokens: 128000
+          max_output_tokens: 16384
+          EOF
+          cat > config/crawler.yaml << EOF
+          sitemap_url: "http://test.com"
+          timeout: 30
+          max_urls: null
+          delay_between_requests: 0.5
+          output_dir: ./crawl_results
+          user_agent: "TestAgent"
+          url_include_patterns: []
+          url_exclude_patterns: []
+          scheduler:
+            hour: 22
+            minute: 0
+          EOF
+          cat > config/smtp.yaml << EOF
+          server: smtp.test.com
+          port: 587
+          user: test@test.com
+          password: test
+          test_user: test@test.com
+          EOF
+          cat > config/rerank.yaml << EOF
+          enabled: false
+          model: test-rerank
+          EOF
+          cat > config/firecrawl.yaml << EOF
+          enabled: false
+          EOF
+          cat > config/prompts.yaml << EOF
+          question_extraction_system: "test prompt"
+          answer_generation_system: "test prompt"
+          EOF
+          cat > config/content.yaml << EOF
+          max_content_length_per_page: 2000
+          EOF
+          cat > config/service.yaml << EOF
+          app_port: 9023
+          EOF
 
       - name: Run unit tests with coverage
         run: |
@@ -91,9 +139,6 @@ jobs:
             --cov-report=xml \
             --cov-report=term-missing \
             --cov-fail-under=60
-        env:
-          REDIS_URL: redis://localhost:6379
-          OPENAI_API_KEY: test-key
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -167,3 +212,4 @@ jobs:
         run: |
           docker run --rm interview-agent:test python --version
           docker run --rm interview-agent:test pip list
+
