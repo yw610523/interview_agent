@@ -144,35 +144,37 @@ class FeedbackService:
             if existing:
                 # 更新现有反馈
                 feedback = existing
-                
+
                 # 记录是否发生了实质性的学习行为
                 should_increment_review = False
-                
+
                 if 'mastery_level' in feedback_data:
                     old_mastery = feedback.mastery_level
                     new_mastery = feedback_data['mastery_level']
-                    
+
                     logger.info(f"评分变化检查: question_id={question_id}, old={old_mastery}, new={new_mastery}")
-                    
+
                     feedback.mastery_level = new_mastery
-                    
+
                     # 只有在以下情况才增加复习次数：
-                    # 从一个非0评分变为另一个不同的非0评分（真正的重新学习）
+                    # - 掌握程度实质性提升（增加 >= 2 级）
                     # 不包括：
-                    # - 从 0 变为非0（首次评分或取消后重新评分）
+                    # - 微调评分（如 1→2 或 2→1，变化幅度太小）
+                    # - 从 0 变为非0（首次评分）
                     # - 从非0变为 0（取消评分）
                     # - 相同评分重复提交
-                    if old_mastery > 0 and new_mastery > 0 and old_mastery != new_mastery:
-                        # 真正的评分变化，视为重新学习
+                    mastery_diff = new_mastery - old_mastery
+                    if mastery_diff >= 2:
+                        # 实质性提升，视为重新学习
                         should_increment_review = True
-                        logger.info(f"评分变化: {old_mastery} -> {new_mastery}")
-                    elif new_mastery == 0:
-                        logger.info(f"取消评分: {old_mastery} -> 0，不增加复习次数")
-                    elif old_mastery == 0 and new_mastery > 0:
-                        logger.info(f"首次/重新评分: 0 -> {new_mastery}，不增加复习次数")
+                        logger.info(f"实质性提升: {old_mastery} -> {new_mastery} (+{mastery_diff})")
+                    elif mastery_diff == 1:
+                        logger.info(f"微调评分: {old_mastery} -> {new_mastery} (+1)，不增加复习次数")
+                    elif mastery_diff < 0:
+                        logger.info(f"评分下降: {old_mastery} -> {new_mastery} ({mastery_diff})，不增加复习次数")
                     else:
                         logger.info(f"评分未变化: {old_mastery} == {new_mastery}，不增加复习次数")
-                    
+
                 if 'is_favorite' in feedback_data:
                     feedback.is_favorite = feedback_data['is_favorite']
                 if 'is_wrong_book' in feedback_data:
@@ -390,62 +392,62 @@ class FeedbackService:
     ) -> List[Dict[str, Any]]:
         """
         使用 Rerank 模型对题目进行重排序
-    
+
         参数:
             user_profile: 用户画像/查询文本（例如："我需要复习 Python 异步编程相关的题目"）
             questions: 候选题目列表
             top_k: 返回的题目数量
-    
+
         返回:
             重排序后的题目列表
         """
         if not self.rerank_enabled or not self.openai_client or not questions:
             logger.warning("Rerank 未启用或客户端未初始化，跳过重排序")
             return questions[:top_k]
-    
+
         try:
             # 构建文档列表（题目标题 + 答案前100字）
             documents = []
             for q in questions:
                 doc_text = f"{q['title']}\n{q.get('answer', '')[:100]}"
                 documents.append(doc_text)
-        
+
             # 调用 Rerank API - 使用标准的 /v1/rerank endpoint
             import requests
-                    
+
             # 获取 base_url 并构造 rerank endpoint
             base_url = str(self.openai_client.base_url).rstrip('/')
             rerank_url = f"{base_url}/rerank"
-                    
+
             headers = {
                 "Authorization": f"Bearer {self.openai_client.api_key}",
                 "Content-Type": "application/json"
             }
-                    
+
             payload = {
                 "model": self.rerank_model,
                 "query": user_profile,
                 "documents": documents,
                 "top_n": len(documents)
             }
-                    
+
             response = requests.post(rerank_url, json=payload, headers=headers, timeout=30)
             response.raise_for_status()
             result = response.json()
-        
+
             # 解析 Rerank 结果
             if 'results' in result and result['results']:
                 scored_questions = []
                 for item in result['results']:
                     index = item.get('index')
                     score = item.get('relevance_score', 0.0)
-                            
+
                     if index is not None and index < len(questions):
                         scored_questions.append({
                             **questions[index],
                             'rerank_score': float(score)
                         })
-                        
+
                 # 按 Rerank 分数降序排序
                 if scored_questions:
                     scored_questions.sort(key=lambda x: x['rerank_score'], reverse=True)
@@ -457,7 +459,7 @@ class FeedbackService:
             else:
                 logger.warning(f"Rerank API 返回格式异常: {result}，降级为规则排序")
                 return questions[:top_k]
-    
+
         except Exception as e:
             logger.error(f"Rerank 失败: {str(e)}，降级为规则排序")
             return questions[:top_k]
@@ -487,7 +489,7 @@ class FeedbackService:
         mastery_multiplier = 1.0 + (mastery_level * 0.2)  # 每级增加20%间隔
 
         final_interval = int(base_interval * mastery_multiplier)
-        
+
         # 限制最大间隔为30天
         final_interval = min(final_interval, 30)
 

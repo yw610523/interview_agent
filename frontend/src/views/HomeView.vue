@@ -1,67 +1,21 @@
 <template>
   <div class="home-view">
-    <!-- 顶部功能区 -->
+    <!-- 顶部搜索区 -->
     <div class="top-section">
-      <!-- 智能推荐配置 -->
-      <a-card :bordered="false" class="recommend-card">
-        <a-space direction="vertical" style="width: 100%;">
-          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-            <div style="display: flex; align-items: center; gap: 16px;">
-              <span style="font-weight: 500;">🎯 智能推荐</span>
-              <a-input-number 
-                v-model:value="recommendCount" 
-                :min="1" 
-                :max="50"
-                size="small"
-                style="width: 100px;"
-                addon-before="数量"
-              />
-              <a-tooltip title="启用 Rerank 模型进行智能重排序">
-                <a-switch v-model:checked="useRerank" size="small">
-                  <template #checkedChildren>🚀</template>
-                  <template #unCheckedChildren>⚡</template>
-                </a-switch>
-              </a-tooltip>
-              <span style="font-size: 12px; color: #8c8c8c;">
-                {{ useRerank ? '已启用 Rerank' : '未启用 Rerank' }}
-              </span>
-            </div>
-            <a-button type="primary" @click="loadRecommendedQuestions" :loading="loadingRecommend">
-              🎯 获取推荐
-            </a-button>
-          </div>
-          <div style="font-size: 12px; color: #8c8c8c; line-height: 1.5;">
-            💡 基于掌握程度和艾宾浩斯遗忘曲线智能推荐，优先展示未掌握且重要的题目
-            <span v-if="useRerank" style="color: #1890ff;"> | 🚀 Rerank 模型同时用于搜索重排序</span>
-          </div>
-        </a-space>
-      </a-card>
-
       <!-- 搜索框 -->
       <div class="search-container">
         <a-input
           v-model:value="searchQuery"
-          placeholder="搜索面试题..."
+          :placeholder="!hasSearched ? '输入关键词搜索面试题（留空查看推荐）' : '搜索面试题...'"
           size="large"
           allow-clear
-          @keyup.enter="handleSearch"
+          @keyup.enter="handleSearchOrRecommend"
           class="search-input"
         >
-          <template #prefix>
-            <SearchOutlined />
-          </template>
           <template #suffix>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <a-segmented
-                v-model:value="searchMode"
-                :options="searchModeOptions"
-                size="small"
-                style="margin-right: 8px;"
-              />
-              <a-button type="primary" @click="handleSearch" :loading="searching">
-                搜索
-              </a-button>
-            </div>
+            <a-button type="primary" @click="handleSearchOrRecommend" :loading="loading">
+              搜索
+            </a-button>
           </template>
         </a-input>
       </div>
@@ -71,21 +25,27 @@
     <div class="results-container">
       <QuestionList
         :questions="displayQuestions"
-        :pagination="true"
-        :page-size="10"
+        :pagination="false"
         @item-click="showQuestionDetail"
+      />
+    </div>
+
+    <!-- 分页组件（放在列表下方） -->
+    <div v-if="hasSearched && searchResults.length > 10" class="pagination-container">
+      <a-pagination
+        v-model:current="currentPage"
+        :total="searchResults.length"
+        :page-size="10"
+        show-size-changer
+        :show-total="(total) => `共 ${total} 条结果`"
+        @change="handlePageChange"
       />
     </div>
 
     <!-- 空状态提示 -->
     <a-empty 
-      v-if="!loadingRecommend && displayQuestions.length === 0 && !hasSearched" 
-      description="点击【获取推荐】按钮查看智能推荐的面试题" 
-      class="empty-state"
-    />
-    <a-empty 
-      v-else-if="hasSearched && displayQuestions.length === 0" 
-      description="没有找到相关的面试题，请尝试其他关键词" 
+      v-if="!loading && displayQuestions.length === 0 && !hasSearched" 
+      description="正在为您智能推荐面试题..." 
       class="empty-state"
     />
 
@@ -108,43 +68,85 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { questionApi, crawlerApi } from '../services'
 import { message } from 'ant-design-vue'
-import { SearchOutlined } from '@ant-design/icons-vue'
 import QuestionList from '../components/QuestionList.vue'
 import QuestionDetailModal from '../components/QuestionDetailModal.vue'
 
 const questionCount = ref(0)
 const lastCrawlTime = ref('')
 
-// 推荐相关
-const recommendCount = ref(10)
-const useRerank = ref(false)  // 是否启用 Rerank（同时用于搜索和推荐）
-const loadingRecommend = ref(false)
-const recommendedQuestions = ref([])
-
 // 搜索相关
 const searchQuery = ref('')
-const searching = ref(false)
+const loading = ref(false)
 const searchResults = ref([])
 const hasSearched = ref(false)
-const searchMode = ref('hybrid') // semantic | exact | hybrid
-const searchModeOptions = [
-  { label: '语义', value: 'semantic' },
-  { label: '精确', value: 'exact' },
-  { label: '混合', value: 'hybrid' }
-]
+const currentPage = ref(1)
+const pageSize = 10
 
-// 显示的题目列表（搜索结果或推荐结果）
+// 分页后的显示数据
 const displayQuestions = computed(() => {
-  return hasSearched.value ? searchResults.value : recommendedQuestions.value
+  if (!hasSearched.value) {
+    return recommendedQuestions.value
+  }
+  // 搜索模式：根据当前页切片
+  const start = (currentPage.value - 1) * pageSize
+  const end = start + pageSize
+  return searchResults.value.slice(start, end)
 })
+
+// 显示的全局索引偏移（保留用于其他可能用途）
+const currentIndexOffset = computed(() => {
+  return hasSearched.value ? (currentPage.value - 1) * pageSize : 0
+})
+
+// 推荐相关
+const recommendedQuestions = ref([])
 
 // 模态框相关
 const detailModalVisible = ref(false)
 const currentQuestion = ref(null)
 const currentIndex = ref(0)
+
+// 键盘导航
+const handleKeydown = (e) => {
+  // 只在模态框打开时响应
+  if (!detailModalVisible.value) return
+  
+  // 如果用户在输入框中，不拦截按键
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+  
+  const list = displayQuestions.value
+  if (list.length === 0) return
+  
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    // 上一题
+    const newIndex = (currentIndex.value - 1 + list.length) % list.length
+    currentIndex.value = newIndex
+    currentQuestion.value = list[newIndex]
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    // 下一题
+    const newIndex = (currentIndex.value + 1) % list.length
+    currentIndex.value = newIndex
+    currentQuestion.value = list[newIndex]
+  }
+}
+
+// 监听模态框状态变化，动态添加/移除键盘事件
+watch(detailModalVisible, (visible) => {
+  if (visible) {
+    window.addEventListener('keydown', handleKeydown)
+  } else {
+    window.removeEventListener('keydown', handleKeydown)
+  }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
+})
 
 // 加载统计数据
 const loadStats = async () => {
@@ -163,54 +165,59 @@ const loadStats = async () => {
   }
 }
 
-// 加载推荐题目
+// 加载推荐题目（最多10条）
 const loadRecommendedQuestions = async () => {
-  loadingRecommend.value = true
+  loading.value = true
   hasSearched.value = false
   
   try {
     const res = await questionApi.getRecommendedQuestions(
-      recommendCount.value,
+      10,  // 固定返回10条
       true,  // 排除已掌握的题目
-      useRerank.value  // 是否启用 Rerank
+      true   // 自动启用 Rerank（后端会自动降级）
     )
     
     if (res.questions) {
       recommendedQuestions.value = res.questions
-      const rerankText = useRerank.value ? '（使用 Rerank 重排序）' : ''
-      message.success(`已推荐 ${res.total} 道高优先级题目${rerankText}`)
       
       if (res.total === 0) {
         message.info('所有题目都已掌握，太棒了！')
+      } else {
+        const rerankStatus = res.rerank_used ? '（已使用 Rerank 优化排序）' : ''
+        console.log(`推荐了 ${res.total} 道题目${rerankStatus}`)
       }
     }
   } catch (error) {
     message.error('获取推荐题目失败')
     console.error(error)
   } finally {
-    loadingRecommend.value = false
+    loading.value = false
   }
 }
 
-// 处理搜索
-const handleSearch = async () => {
+// 处理搜索或推荐（根据搜索框是否为空决定）
+const handleSearchOrRecommend = async () => {
+  // 如果搜索框为空，切换到推荐模式
   if (!searchQuery.value.trim()) {
+    await loadRecommendedQuestions()
     return
   }
 
-  searching.value = true
+  // 否则执行搜索
+  loading.value = true
   hasSearched.value = true
   searchResults.value = []
+  currentPage.value = 1 // 重置页码
 
   try {
     const res = await questionApi.searchQuestions(
       searchQuery.value,
-      10,
+      100,  // 不限制数量，搜到多少是多少
       undefined, // tags
       undefined, // difficulty
       undefined, // category
-      searchMode.value, // search_mode
-      useRerank.value // use_rerank - 搜索时也使用 Rerank
+      'hybrid', // 固定使用混合搜索
+      true // 自动启用 Rerank（后端会自动降级）
     )
     
     searchResults.value = res.results || []
@@ -218,26 +225,25 @@ const handleSearch = async () => {
     if (searchResults.value.length === 0) {
       message.info('没有找到相关的面试题')
     } else {
-      const modeText = {
-        'semantic': '语义',
-        'exact': '精确',
-        'hybrid': '混合'
-      }
-      const rerankText = useRerank.value ? ' + Rerank' : ''
-      message.success(`找到 ${searchResults.value.length} 个结果（${modeText[searchMode.value]}搜索${rerankText}）`)
+      message.success(`找到 ${searchResults.value.length} 个结果`)
     }
   } catch (error) {
     message.error('搜索失败')
     console.error(error)
   } finally {
-    searching.value = false
+    loading.value = false
   }
 }
 
-// 显示题目详情
-const showQuestionDetail = (index) => {
-  currentIndex.value = index
-  currentQuestion.value = displayQuestions.value[index]
+// 处理页码变化
+const handlePageChange = (page) => {
+  currentPage.value = page
+}
+
+// 显示题目详情（直接使用当前页的数据）
+const showQuestionDetail = (pageIndex) => {
+  currentIndex.value = pageIndex
+  currentQuestion.value = displayQuestions.value[pageIndex]
   detailModalVisible.value = true
 }
 
@@ -245,9 +251,8 @@ const showQuestionDetail = (index) => {
 const handleFeedbackChanged = async ({ questionId, type, value }) => {
   console.log('反馈变化:', { questionId, type, value })
   
-  // 更新当前列表中的题目数据
-  const updateList = hasSearched.value ? searchResults.value : recommendedQuestions.value
-  const question = updateList.find(q => q.id === questionId)
+  // 在全部搜索结果中查找并更新
+  const question = searchResults.value.find(q => q.id === questionId)
   if (question) {
     if (type === 'favorite') {
       question.is_favorite = value
@@ -286,12 +291,6 @@ onMounted(() => {
   flex-shrink: 0;
   margin-bottom: 16px;
   width: 100%;
-}
-
-.recommend-card {
-  margin-bottom: 12px;
-  background: linear-gradient(135deg, #f0f5ff 0%, #e6f4ff 100%);
-  border-radius: 8px;
 }
 
 .search-container {

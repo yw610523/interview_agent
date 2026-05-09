@@ -33,6 +33,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 load_dotenv()
 
+
 @dataclass
 class VectorRecord:
     """
@@ -48,6 +49,7 @@ class VectorRecord:
     difficulty: str
     category: str
     embedding: Optional[List[float]] = None
+
 
 class VectorService:
     """

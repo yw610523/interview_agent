@@ -129,7 +129,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { CloseOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons-vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import { feedbackApi } from '../services'
@@ -153,9 +153,23 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'close', 'feedback-changed'])
 
 const visible = ref(false)
-const isFullscreen = ref(true) // 默认全屏
-const modalWidth = ref('100vw') // 默认全屏宽度
-const modalMaxHeight = ref('calc(100vh - 110px)') // 默认全屏高度
+const isFullscreen = ref(false) // 默认不全屏
+const modalWidth = ref(800) // 默认电脑端宽度
+const modalMaxHeight = ref('70vh') // 默认电脑端高度
+
+// 检测是否为移动端
+const isMobile = () => {
+  return window.innerWidth <= 768
+}
+
+// 滚动位置记忆（按题目 ID 存储）
+const scrollPositions = new Map()
+let currentScrollTop = 0
+
+// 获取滚动容器
+const getScrollContainer = () => {
+  return document.querySelector('.question-detail-modal .ant-modal-body')
+}
 
 // 反馈数据
 const feedbackData = ref({
@@ -171,13 +185,59 @@ const submittingFeedback = ref(false)
 watch(() => props.modelValue, (newVal) => {
   visible.value = newVal
   if (newVal) {
-    isFullscreen.value = true // 打开时默认全屏
-    modalWidth.value = '100vw'
-    modalMaxHeight.value = 'calc(100vh - 110px)'
+    // 根据设备类型设置默认状态
+    if (isMobile()) {
+      isFullscreen.value = true
+      modalWidth.value = '100vw'
+      modalMaxHeight.value = 'calc(100vh - 110px)'
+    } else {
+      isFullscreen.value = false
+      modalWidth.value = 800
+      modalMaxHeight.value = '70vh'
+    }
     // 加载反馈数据
     loadFeedback()
+    // 恢复滚动位置
+    restoreScrollPosition()
+  } else {
+    // 关闭时保存当前滚动位置
+    saveScrollPosition()
   }
 })
+
+// 监听题目切换，保存旧的滚动位置并恢复新的
+watch(() => props.question?.id, async (newId, oldId) => {
+  // 保存旧题目的滚动位置
+  if (oldId) {
+    const container = getScrollContainer()
+    if (container) {
+      scrollPositions.set(oldId, container.scrollTop)
+    }
+  }
+  
+  // 恢复新题目的滚动位置
+  if (newId) {
+    await nextTick()
+    restoreScrollPosition()
+  }
+})
+
+// 保存滚动位置
+const saveScrollPosition = () => {
+  const container = getScrollContainer()
+  if (container && props.question?.id) {
+    scrollPositions.set(props.question.id, container.scrollTop)
+  }
+}
+
+// 恢复滚动位置
+const restoreScrollPosition = () => {
+  const container = getScrollContainer()
+  if (container && props.question?.id) {
+    const savedPosition = scrollPositions.get(props.question.id) || 0
+    container.scrollTop = savedPosition
+  }
+}
 
 // 加载反馈数据
 const loadFeedback = async () => {
@@ -221,6 +281,9 @@ const handleClose = () => {
 
 // 切换全屏
 const toggleFullscreen = () => {
+  // 切换前保存当前位置
+  saveScrollPosition()
+  
   isFullscreen.value = !isFullscreen.value
   if (isFullscreen.value) {
     modalWidth.value = '100vw'
@@ -229,6 +292,11 @@ const toggleFullscreen = () => {
     modalWidth.value = 800
     modalMaxHeight.value = '70vh'
   }
+  
+  // 切换后恢复位置
+  nextTick(() => {
+    restoreScrollPosition()
+  })
 }
 
 // ESC 键关闭模态框，Ctrl+Enter 切换全屏

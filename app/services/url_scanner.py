@@ -135,7 +135,7 @@ class URLScanner:
             if self.use_firecrawl:
                 logger.info(f"使用 Firecrawl 爬取页面: {url}")
                 firecrawl_result = self._scan_with_firecrawl(url)
-                
+
                 if firecrawl_result.success:
                     logger.info(f"Firecrawl 爬取成功: {firecrawl_result.title}")
                     result.status_code = 200
@@ -145,15 +145,15 @@ class URLScanner:
                     result.word_count = len(result.text_content.split())
                     result.content_type = firecrawl_result.content_type or "text/html"
                     result.load_time = time.time() - start_time
-                    
+
                     # 解析 HTML 内容
                     if result.html_content:
                         self._parse_html(url, result.html_content, result)
-                    
+
                     return result
                 else:
                     logger.warning(f"Firecrawl 爬取失败: {firecrawl_result.error}，降级使用传统爬虫")
-            
+
             # 检测是否为微信公众号文章（需要 JavaScript 渲染）
             is_wechat = "weixin.qq.com" in url or "mp.weixin.qq.com" in url
             if is_wechat:
@@ -369,7 +369,7 @@ class URLScanner:
         logger.warning(f"无法从页面提取标题: {url}")
         return None
 
-    def _scan_with_firecrawl(self, url: str) -> 'FirecrawlResult':
+    def _scan_with_firecrawl(self, url: str):
         """
         使用 Firecrawl 爬取页面（支持 JavaScript 渲染）。
 
@@ -404,7 +404,7 @@ class URLScanner:
             try:
                 loop = asyncio.get_running_loop()
                 # 如果已经有运行的循环，使用 nest_asyncio 允许嵌套
-                logger.debug(f"检测到运行中的事件循环，应用 nest_asyncio")
+                logger.debug("检测到运行中的事件循环，应用 nest_asyncio")
                 nest_asyncio.apply(loop)
                 # 在当前循环中运行
                 return loop.run_until_complete(do_scrape())

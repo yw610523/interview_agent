@@ -405,14 +405,14 @@ class LLMService:
             next_start = split_pos - overlap
             if next_start < 0:
                 next_start = 0
-            
+
             # 避免无限循环：确保next_start至少前进max_length的一半
             min_advance = max_length // 2
             if next_start < start + min_advance:
                 next_start = start + min_advance
-            
+
             start = next_start
-            
+
             # 安全检查：确保不会无限循环
             if len(chunks) > 100:  # 最多100个chunk
                 logger.warning(f"chunk数量过多({len(chunks)})，停止分割")
@@ -545,7 +545,7 @@ URL: {url}
                 logger.info(f"chunk {chunk_idx + 1}/{len(chunks)} 识别出 {len(questions)} 个问题（经过 {retry_count} 次重试）")
             else:
                 logger.info(f"chunk {chunk_idx + 1}/{len(chunks)} 识别出 {len(questions)} 个问题")
-            
+
             # 每处理10个chunk输出一次进度
             if (chunk_idx + 1) % 10 == 0:
                 logger.info(f"已处理 {chunk_idx + 1}/{len(chunks)} 个chunk，累计识别 {len(all_questions)} 个问题")
