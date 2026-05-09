@@ -35,12 +35,10 @@ class QuestionFeedback:
     question_id: str
     user_id: str = "default"  # 当前简化为单用户
     mastery_level: int = 0  # 掌握程度 0-5 (0=未学习, 5=完全掌握)
-    last_reviewed_at: Optional[str] = None  # 最后复习时间 ISO格式
-    review_count: int = 0  # 复习次数
-    next_review_at: Optional[str] = None  # 下次复习时间 ISO格式
     is_favorite: bool = False  # 是否收藏
     is_wrong_book: bool = False  # 是否在错题本
-    historical_max_mastery: int = 0  # 历史最高掌握程度（用于防止刷分）
+    hide_from_recommendation: bool = False  # 是否从推荐中隐藏（满级后用户选择）
+    hidden_at: Optional[str] = None  # 隐藏时间（用于30天后自动恢复）
     created_at: Optional[str] = None  # 创建时间
     updated_at: Optional[str] = None  # 更新时间
 
@@ -146,61 +144,28 @@ class FeedbackService:
                 # 更新现有反馈
                 feedback = existing
 
-                # 记录是否发生了实质性的学习行为
-                should_increment_review = False
-
                 if 'mastery_level' in feedback_data:
                     old_mastery = feedback.mastery_level
                     new_mastery = feedback_data['mastery_level']
-
-                    logger.info(f"评分变化检查: question_id={question_id}, old={old_mastery}, new={new_mastery}")
-
+                    logger.info(f"评分变化: question_id={question_id}, old={old_mastery}, new={new_mastery}")
                     feedback.mastery_level = new_mastery
-
-                    # 只有在以下情况才增加复习次数：
-                    # - 掌握程度实质性提升（增加 >= 2 级）且新等级高于历史最高等级
-                    # 不包括：
-                    # - 微调评分（如 1→2 或 2→1，变化幅度太小）
-                    # - 从高到低的下降（如 5→1）
-                    # - 相同评分重复提交
-                    # - 在已访问过的等级间反复切换（防止刷分）
-                    mastery_diff = new_mastery - old_mastery
                     
-                    # 获取历史最高等级（用于防止反复切换）
-                    historical_max = max(feedback.historical_max_mastery, old_mastery)
-                    
-                    if mastery_diff >= 2 and new_mastery > historical_max:
-                        # 实质性提升且突破历史记录，视为重新学习
-                        should_increment_review = True
-                        logger.info(f"实质性提升并突破历史: {old_mastery} -> {new_mastery} (历史最高:{historical_max})")
-                        # 更新历史最高等级
-                        feedback.historical_max_mastery = new_mastery
-                    elif mastery_diff >= 2:
-                        logger.info(f"实质性提升但未突破历史: {old_mastery} -> {new_mastery} (历史最高:{historical_max})，不增加复习次数")
-                    elif mastery_diff == 1:
-                        logger.info(f"微调评分: {old_mastery} -> {new_mastery} (+1)，不增加复习次数")
-                    elif mastery_diff < 0:
-                        logger.info(f"评分下降: {old_mastery} -> {new_mastery} ({mastery_diff})，不增加复习次数")
-                    else:
-                        logger.info(f"评分未变化: {old_mastery} == {new_mastery}，不增加复习次数")
+                    # 如果达到满级（5级），询问是否从推荐中隐藏
+                    if new_mastery == 5 and old_mastery < 5:
+                        # 用户可以选择不再在推荐中出现
+                        if feedback_data.get('hide_from_recommendation', False):
+                            feedback.hide_from_recommendation = True
+                            feedback.hidden_at = now
+                            logger.info(f"题目已隐藏: question_id={question_id}")
 
                 if 'is_favorite' in feedback_data:
                     feedback.is_favorite = feedback_data['is_favorite']
                 if 'is_wrong_book' in feedback_data:
                     feedback.is_wrong_book = feedback_data['is_wrong_book']
-
-                # 如果需要增加复习次数，更新复习信息
-                if should_increment_review:
-                    feedback.last_reviewed_at = now
-                    feedback.review_count += 1
-                    # 计算下次复习时间（基于艾宾浩斯曲线）
-                    feedback.next_review_at = self._calculate_next_review(
-                        feedback.mastery_level,
-                        feedback.review_count
-                    ).isoformat()
-                    logger.info(f"复习次数增加: question_id={question_id}, count={feedback.review_count}")
-                else:
-                    logger.info(f"复习次数不变: question_id={question_id}, count={feedback.review_count}")
+                if 'hide_from_recommendation' in feedback_data:
+                    feedback.hide_from_recommendation = feedback_data['hide_from_recommendation']
+                    if feedback.hide_from_recommendation and not feedback.hidden_at:
+                        feedback.hidden_at = now
 
                 feedback.updated_at = now
             else:
@@ -210,26 +175,24 @@ class FeedbackService:
                     mastery_level=feedback_data.get('mastery_level', 0),
                     is_favorite=feedback_data.get('is_favorite', False),
                     is_wrong_book=feedback_data.get('is_wrong_book', False),
+                    hide_from_recommendation=feedback_data.get('hide_from_recommendation', False),
                     created_at=now,
                     updated_at=now
                 )
-
-                # 如果提交了掌握程度，初始化历史最高等级
-                if 'mastery_level' in feedback_data:
-                    feedback.historical_max_mastery = feedback.mastery_level
-                    # 注意：首次评分不算复习，所以 review_count 保持为 0
+                
+                # 如果创建时就标记隐藏，设置隐藏时间
+                if feedback.hide_from_recommendation:
+                    feedback.hidden_at = now
 
             # 存储到 Redis
             self.redis_client.hset(key, mapping={
                 'question_id': feedback.question_id,
                 'user_id': feedback.user_id,
                 'mastery_level': str(feedback.mastery_level),
-                'last_reviewed_at': feedback.last_reviewed_at or '',
-                'review_count': str(feedback.review_count),
-                'next_review_at': feedback.next_review_at or '',
                 'is_favorite': str(feedback.is_favorite),
                 'is_wrong_book': str(feedback.is_wrong_book),
-                'historical_max_mastery': str(feedback.historical_max_mastery),
+                'hide_from_recommendation': str(feedback.hide_from_recommendation),
+                'hidden_at': feedback.hidden_at or '',
                 'created_at': feedback.created_at or '',
                 'updated_at': feedback.updated_at or ''
             })
@@ -266,12 +229,10 @@ class FeedbackService:
                 question_id=data.get(b'question_id', b'').decode(),
                 user_id=data.get(b'user_id', b'default').decode(),
                 mastery_level=int(data.get(b'mastery_level', b'0')),
-                last_reviewed_at=data.get(b'last_reviewed_at', b'').decode() or None,
-                review_count=int(data.get(b'review_count', b'0')),
-                next_review_at=data.get(b'next_review_at', b'').decode() or None,
                 is_favorite=data.get(b'is_favorite', b'False').decode() == 'True',
                 is_wrong_book=data.get(b'is_wrong_book', b'False').decode() == 'True',
-                historical_max_mastery=int(data.get(b'historical_max_mastery', b'0')),
+                hide_from_recommendation=data.get(b'hide_from_recommendation', b'False').decode() == 'True',
+                hidden_at=data.get(b'hidden_at', b'').decode() or None,
                 created_at=data.get(b'created_at', b'').decode() or None,
                 updated_at=data.get(b'updated_at', b'').decode() or None
             )
@@ -450,8 +411,16 @@ class FeedbackService:
                     score = item.get('relevance_score', 0.0)
 
                     if index is not None and index < len(questions):
+                        question = questions[index]
+                        
+                        # 检查是否应该从推荐中排除（隐藏的题目）
+                        feedback = self.get_feedback(question.get('id', ''))
+                        if feedback and self.should_exclude_from_recommendation(question.get('id', '')):
+                            # 隐藏的题目分数大幅降低，排在最后
+                            score = score * 0.1  # 降低到原来的10%
+                        
                         scored_questions.append({
-                            **questions[index],
+                            **question,
                             'rerank_score': float(score)
                         })
 
@@ -622,5 +591,117 @@ class FeedbackService:
         except Exception as e:
             logger.error(f"获取到期题目失败: {str(e)}")
             return []
+
+    def check_and_restore_hidden_questions(self, user_id: str = "default") -> int:
+        """
+        检查并恢复过期的隐藏题目（30天后自动恢复）
+        
+        参数:
+            user_id: 用户ID
+            
+        返回:
+            恢复的题目数量
+        """
+        if not self.redis_client:
+            return 0
+        
+        try:
+            pattern = f"feedback:{user_id}:*"
+            keys = self.redis_client.keys(pattern)
+            restored_count = 0
+            now = datetime.now()
+            
+            for key in keys:
+                data = self.redis_client.hgetall(key)
+                hide_flag = data.get(b'hide_from_recommendation', b'False').decode() == 'True'
+                hidden_at_str = data.get(b'hidden_at', b'').decode()
+                
+                if not hide_flag or not hidden_at_str:
+                    continue
+                
+                try:
+                    hidden_at = datetime.fromisoformat(hidden_at_str)
+                    days_hidden = (now - hidden_at).days
+                    
+                    # 如果超过30天，自动恢复
+                    if days_hidden >= 30:
+                        question_id = data.get(b'question_id', b'').decode()
+                        self.redis_client.hset(key, mapping={
+                            'hide_from_recommendation': 'False',
+                            'hidden_at': ''
+                        })
+                        logger.info(f"题目已自动恢复: question_id={question_id}, 隐藏天数={days_hidden}")
+                        restored_count += 1
+                except ValueError:
+                    continue
+            
+            if restored_count > 0:
+                logger.info(f"共恢复 {restored_count} 个过期隐藏题目")
+            
+            return restored_count
+            
+        except Exception as e:
+            logger.error(f"检查隐藏题目失败: {str(e)}")
+            return 0
+
+    def delete_question_feedback(self, question_id: str, user_id: str = "default") -> bool:
+        """
+        删除题目反馈（软删除，保留30天）
+        
+        参数:
+            question_id: 题目ID
+            user_id: 用户ID
+            
+        返回:
+            是否成功
+        """
+        if not self.redis_client:
+            return False
+        
+        try:
+            key = self._get_feedback_key(question_id, user_id)
+            now = datetime.now().isoformat()
+            
+            # 标记为隐藏并设置隐藏时间
+            self.redis_client.hset(key, mapping={
+                'hide_from_recommendation': 'True',
+                'hidden_at': now,
+                'mastery_level': '5',  # 设置为满级
+                'updated_at': now
+            })
+            
+            logger.info(f"题目已软删除: question_id={question_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"删除题目反馈失败: {str(e)}")
+            return False
+
+    def should_exclude_from_recommendation(self, question_id: str, user_id: str = "default") -> bool:
+        """
+        检查题目是否应该从推荐中排除
+        
+        参数:
+            question_id: 题目ID
+            user_id: 用户ID
+            
+        返回:
+            True=应该排除，False=可以推荐
+        """
+        feedback = self.get_feedback(question_id, user_id)
+        if not feedback:
+            return False
+        
+        # 如果标记为隐藏且未过期，则排除
+        if feedback.hide_from_recommendation and feedback.hidden_at:
+            try:
+                hidden_at = datetime.fromisoformat(feedback.hidden_at)
+                days_hidden = (datetime.now() - hidden_at).days
+                # 30天内排除
+                return days_hidden < 30
+            except ValueError:
+                return False
+        
+        return False
 
 # Trigger reload

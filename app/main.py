@@ -696,6 +696,19 @@ async def search_questions(
             except Exception as e:
                 logger.warning(f"Rerank 失败，使用原始搜索结果: {str(e)}")
                 # Rerank 失败不影响搜索结果，继续使用原始结果
+        
+        # 为每个结果添加反馈信息（用于前端标记）
+        for result in results:
+            feedback = feedback_service.get_feedback(result['id'])
+            if feedback:
+                result['mastery_level'] = feedback.mastery_level
+                result['is_favorite'] = feedback.is_favorite
+                result['is_wrong_book'] = feedback.is_wrong_book
+                result['hide_from_recommendation'] = feedback.hide_from_recommendation
+                
+                # 如果题目被隐藏，添加提示信息
+                if feedback_service.should_exclude_from_recommendation(result['id']):
+                    result['status_hint'] = '已掌握' if feedback.mastery_level >= 5 else '低优先级'
 
         return SearchResult(query=query, results=results, total=len(results), rerank_used=rerank_success)
 
@@ -827,8 +840,12 @@ async def get_recommended_questions(
         for question in all_questions:
             feedback = feedback_service.get_feedback(question['id'])
 
-            # 如果排除已掌握的题目
+            # 排除已掌握的题目
             if exclude_mastered and feedback and feedback.mastery_level >= 5:
+                continue
+            
+            # 排除从推荐中隐藏的题目（软删除）
+            if feedback and feedback_service.should_exclude_from_recommendation(question['id']):
                 continue
 
             priority_score = feedback_service.calculate_priority_score(question, feedback)
@@ -838,7 +855,8 @@ async def get_recommended_questions(
                 "priority_score": priority_score,
                 "mastery_level": feedback.mastery_level if feedback else 0,
                 "is_favorite": feedback.is_favorite if feedback else False,
-                "is_wrong_book": feedback.is_wrong_book if feedback else False
+                "is_wrong_book": feedback.is_wrong_book if feedback else False,
+                "hide_from_recommendation": feedback.hide_from_recommendation if feedback else False
             })
 
         # 按优先级分数降序排序
@@ -949,7 +967,8 @@ async def submit_feedback(
     question_id: str,
     mastery_level: Optional[int] = Query(None, ge=0, le=5, description="掌握程度 0-5"),
     is_favorite: Optional[bool] = Query(None, description="是否收藏"),
-    is_wrong_book: Optional[bool] = Query(None, description="是否加入错题本")
+    is_wrong_book: Optional[bool] = Query(None, description="是否加入错题本"),
+    hide_from_recommendation: Optional[bool] = Query(None, description="是否从推荐中隐藏（满级时使用）")
 ):
     """
     提交题目反馈
@@ -959,6 +978,7 @@ async def submit_feedback(
         mastery_level: 掌握程度 (0-5)，0=未学习，5=完全掌握
         is_favorite: 是否收藏
         is_wrong_book: 是否加入错题本
+        hide_from_recommendation: 是否从推荐中隐藏（达到5级时可选）
     """
     try:
         feedback_data = {}
@@ -968,6 +988,8 @@ async def submit_feedback(
             feedback_data['is_favorite'] = is_favorite
         if is_wrong_book is not None:
             feedback_data['is_wrong_book'] = is_wrong_book
+        if hide_from_recommendation is not None:
+            feedback_data['hide_from_recommendation'] = hide_from_recommendation
 
         if not feedback_data:
             raise HTTPException(status_code=400, detail="至少提供一个反馈字段")
@@ -1005,11 +1027,10 @@ async def get_question_feedback(question_id: str):
             "has_feedback": True,
             "feedback": {
                 "mastery_level": feedback.mastery_level,
-                "last_reviewed_at": feedback.last_reviewed_at,
-                "review_count": feedback.review_count,
-                "next_review_at": feedback.next_review_at,
                 "is_favorite": feedback.is_favorite,
-                "is_wrong_book": feedback.is_wrong_book
+                "is_wrong_book": feedback.is_wrong_book,
+                "hide_from_recommendation": feedback.hide_from_recommendation,
+                "hidden_at": feedback.hidden_at
             }
         }
 
@@ -1105,6 +1126,35 @@ async def remove_from_wrong_book(question_id: str):
         raise
     except Exception as e:
         logger.error(f"Remove from wrong book error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/questions/{question_id}", summary="删除题目（软删除）")
+async def delete_question(question_id: str):
+    """
+    删除题目（软删除，保留30天）
+    
+    删除后的题目：
+    - 不会出现在推荐列表中
+    - 搜索时仍会出现，但标记为“已掌握”或“低优先级”
+    - Rerank排序时会靠后
+    - 30天后自动恢复
+    """
+    try:
+        success = await run_sync(feedback_service.delete_question_feedback, question_id)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="删除失败")
+
+        return {
+            "status": "success",
+            "message": "题目已删除（30天后可恢复）"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete question error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
