@@ -40,6 +40,7 @@ class QuestionFeedback:
     next_review_at: Optional[str] = None  # 下次复习时间 ISO格式
     is_favorite: bool = False  # 是否收藏
     is_wrong_book: bool = False  # 是否在错题本
+    historical_max_mastery: int = 0  # 历史最高掌握程度（用于防止刷分）
     created_at: Optional[str] = None  # 创建时间
     updated_at: Optional[str] = None  # 更新时间
 
@@ -157,17 +158,25 @@ class FeedbackService:
                     feedback.mastery_level = new_mastery
 
                     # 只有在以下情况才增加复习次数：
-                    # - 掌握程度实质性提升（增加 >= 2 级）
+                    # - 掌握程度实质性提升（增加 >= 2 级）且新等级高于历史最高等级
                     # 不包括：
                     # - 微调评分（如 1→2 或 2→1，变化幅度太小）
-                    # - 从 0 变为非0（首次评分）
-                    # - 从非0变为 0（取消评分）
+                    # - 从高到低的下降（如 5→1）
                     # - 相同评分重复提交
+                    # - 在已访问过的等级间反复切换（防止刷分）
                     mastery_diff = new_mastery - old_mastery
-                    if mastery_diff >= 2:
-                        # 实质性提升，视为重新学习
+                    
+                    # 获取历史最高等级（用于防止反复切换）
+                    historical_max = max(feedback.historical_max_mastery, old_mastery)
+                    
+                    if mastery_diff >= 2 and new_mastery > historical_max:
+                        # 实质性提升且突破历史记录，视为重新学习
                         should_increment_review = True
-                        logger.info(f"实质性提升: {old_mastery} -> {new_mastery} (+{mastery_diff})")
+                        logger.info(f"实质性提升并突破历史: {old_mastery} -> {new_mastery} (历史最高:{historical_max})")
+                        # 更新历史最高等级
+                        feedback.historical_max_mastery = new_mastery
+                    elif mastery_diff >= 2:
+                        logger.info(f"实质性提升但未突破历史: {old_mastery} -> {new_mastery} (历史最高:{historical_max})，不增加复习次数")
                     elif mastery_diff == 1:
                         logger.info(f"微调评分: {old_mastery} -> {new_mastery} (+1)，不增加复习次数")
                     elif mastery_diff < 0:
@@ -205,14 +214,10 @@ class FeedbackService:
                     updated_at=now
                 )
 
-                # 如果提交了掌握程度，设置复习信息
+                # 如果提交了掌握程度，初始化历史最高等级
                 if 'mastery_level' in feedback_data:
-                    feedback.last_reviewed_at = now
-                    feedback.review_count = 1
-                    feedback.next_review_at = self._calculate_next_review(
-                        feedback.mastery_level,
-                        feedback.review_count
-                    ).isoformat()
+                    feedback.historical_max_mastery = feedback.mastery_level
+                    # 注意：首次评分不算复习，所以 review_count 保持为 0
 
             # 存储到 Redis
             self.redis_client.hset(key, mapping={
@@ -224,6 +229,7 @@ class FeedbackService:
                 'next_review_at': feedback.next_review_at or '',
                 'is_favorite': str(feedback.is_favorite),
                 'is_wrong_book': str(feedback.is_wrong_book),
+                'historical_max_mastery': str(feedback.historical_max_mastery),
                 'created_at': feedback.created_at or '',
                 'updated_at': feedback.updated_at or ''
             })
@@ -265,6 +271,7 @@ class FeedbackService:
                 next_review_at=data.get(b'next_review_at', b'').decode() or None,
                 is_favorite=data.get(b'is_favorite', b'False').decode() == 'True',
                 is_wrong_book=data.get(b'is_wrong_book', b'False').decode() == 'True',
+                historical_max_mastery=int(data.get(b'historical_max_mastery', b'0')),
                 created_at=data.get(b'created_at', b'').decode() or None,
                 updated_at=data.get(b'updated_at', b'').decode() or None
             )
