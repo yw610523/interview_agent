@@ -71,7 +71,7 @@ check_robots_txt: true
 
 # 是否启用 Firecrawl 服务（用于 JavaScript 渲染页面的爬取）
 # 详细的 Firecrawl 配置请在 firecrawl.yaml 中设置
-use_firecrawl: false
+use_firecrawl: ${FIRECRAWL_ENABLED:-false}
 
 # --- URL 过滤规则 ---
 
