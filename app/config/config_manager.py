@@ -66,19 +66,15 @@ class ConfigManager:
         """
         初始化 Redis 客户端
         
-        注意：每次启动都从 YAML 配置文件重新读取 Redis 配置
-        避免使用缓存的配置导致无法连接
+        注意：Redis 配置优先从环境变量读取，确保能够连接到 Redis
+        其他配置模块由 _sync_defaults_to_redis() 处理
         """
         try:
-            # 每次都从 YAML 文件重新加载配置（不使用缓存）
-            temp_config = self._load_config()
-            temp_config = self._resolve_env_variables(temp_config)
-            redis_config = temp_config.get('redis', {})
-            
-            host = redis_config.get('host', 'localhost')
-            port = int(redis_config.get('port', 6379))
-            password = redis_config.get('password', '')
-            db = int(redis_config.get('db', 0))
+            # 优先从环境变量读取 Redis 连接信息（避免循环依赖）
+            host = os.getenv('REDIS_HOST') or 'localhost'
+            port = int(os.getenv('REDIS_PORT', '6379'))
+            password = os.getenv('REDIS_PASSWORD', '')
+            db = int(os.getenv('REDIS_DB', '0'))
             
             if password:
                 redis_url = f"redis://:{password}@{host}:{port}/{db}"
@@ -221,8 +217,8 @@ class ConfigManager:
         将 YAML 默认配置同步到 Redis
         
         策略：
-        1. 如果原始 YAML 包含环境变量占位符，每次都重新同步（确保使用最新的环境变量值）
-        2. 如果 Redis 中没有该模块的配置，则同步
+        1. 只有当 Redis 中没有该模块的配置时，才从 YAML 同步
+        2. 如果 Redis 中已有配置（用户通过前端修改），则保留不变
         3. 排除 redis 模块，避免循环依赖问题
         """
         if not self.redis_client:
@@ -241,19 +237,17 @@ class ConfigManager:
             redis_key = f"{self._redis_prefix}{module_name}"
             existing = self.redis_client.get(redis_key)
             
-            # 检查原始 YAML 配置中是否包含环境变量占位符
-            raw_config = self._raw_yaml_config.get(module_name, {})
-            has_env_vars = self._has_env_variables(raw_config)
-            
-            if existing is None or has_env_vars:
-                # Redis 中没有，或原始配置包含环境变量需要重新解析，则同步
+            if existing is None:
+                # Redis 中没有配置，从 YAML 同步默认值
                 self.redis_client.set(redis_key, json.dumps(module_config, ensure_ascii=False))
                 synced_count += 1
-                action = "新增" if existing is None else "更新（环境变量变化）"
-                logger.debug(f"同步配置到 Redis: {module_name} ({action}, env_vars={has_env_vars})")
+                logger.debug(f"同步默认配置到 Redis: {module_name}")
+            else:
+                # Redis 中已有配置（可能是用户修改的），保留不变
+                logger.debug(f"Redis 中已有 {module_name} 配置，跳过同步")
 
         if synced_count > 0:
-            logger.info(f"已将 {synced_count} 个模块的配置同步到 Redis")
+            logger.info(f"已将 {synced_count} 个模块的默认配置同步到 Redis")
 
     def _get_from_redis(self, module_name: str) -> Optional[Dict[str, Any]]:
         """从 Redis 获取配置"""
