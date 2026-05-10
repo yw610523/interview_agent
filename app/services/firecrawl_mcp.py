@@ -71,11 +71,11 @@ class FirecrawlMCPService:
 
         # 如果是官方 API，使用官方端点
         if use_official_api:
-            # 如果 api_url 未配置或不是 http 开头，使用默认官方地址
+            # 如果 api_url 未配置或不是 http 开头，使用默认官方地址（v2）
             if not api_url or not api_url.startswith("http"):
                 self.api_url = "https://api.firecrawl.dev"
             else:
-                # 移除末尾可能存在的 /v1 或 /v2
+                # 移除末尾可能存在的版本号后缀，统一使用 v2
                 self.api_url = api_url.rstrip("/").replace("/v1", "").replace("/v2", "")
 
     async def scrape_url(
@@ -104,9 +104,10 @@ class FirecrawlMCPService:
 
         try:
             # 构建 API 端点
-            # 官方 API: https://api.firecrawl.dev/v1/scrape
-            # 自托管: http://your-server:3002/v1/scrape
-            endpoint = f"{self.api_url}/v1/scrape"
+            # 官方 API v2: https://api.firecrawl.dev/v2/scrape
+            # 自托管服务: http://your-server:3002/v1/scrape (可能仍使用 v1)
+            api_version = "v2" if self.use_official_api else "v1"
+            endpoint = f"{self.api_url}/{api_version}/scrape"
 
             # 构建请求 payload
             payload = {
@@ -195,7 +196,8 @@ class FirecrawlMCPService:
             包含 URLs 列表的字典
         """
         try:
-            endpoint = f"{self.api_url}/v1/map"
+            api_version = "v2" if self.use_official_api else "v1"
+            endpoint = f"{self.api_url}/{api_version}/map"
 
             payload = {
                 "url": url,
