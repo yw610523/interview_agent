@@ -83,10 +83,14 @@ defineProps({
   showRestore: {
     type: Boolean,
     default: false
+  },
+  showNotQuestion: {
+    type: Boolean,
+    default: false
   }
 })
 
-defineEmits(['itemClick', 'permanentDelete', 'restore'])
+defineEmits(['itemClick', 'permanentDelete', 'restore', 'notQuestion'])
 </script>
 
 <style scoped>
