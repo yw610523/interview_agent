@@ -1,8 +1,6 @@
 name: Docker Publish
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
     inputs:
       push_to_registry:
@@ -68,14 +66,8 @@ jobs:
         run: echo ${{ steps.meta.outputs.digest }}
       
       - name: Trigger Jenkins Deployment
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && github.event.inputs.push_to_registry == 'true'
         run: |
-          echo "触发Jenkins部署..."
           curl -X POST ${{ secrets.JENKINS_WEBHOOK_URL }} \
             -H "Content-Type: application/json" \
-            -d '{
-              "image": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}",
-              "tag": "latest",
-              "commit_sha": "${{ github.sha }}",
-              "branch": "${{ github.ref_name }}"
-            }' || echo "Jenkins webhook调用失败，请检查JENKINS_WEBHOOK_URL配置"
+            -d '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'

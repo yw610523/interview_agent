@@ -63,56 +63,74 @@
         </a-form>
       </a-tab-pane>
 
-      <!-- 模型配置 -->
+      <!-- 模型配置（分组：OpenAI、Embedding、Rerank） -->
       <a-tab-pane key="llm" tab="🤖 模型配置">
-        <a-form
-            :model="llmConfig"
-            :label-col="{ span: 8 }"
-            :wrapper-col="{ span: 16 }"
-        >
+        <a-space direction="vertical" style="width: 100%" size="large">
+          <!-- OpenAI 组 -->
+          <a-card title="🔵 OpenAI 配置" :bordered="false" size="small">
+            <a-form
+                :model="llmConfig"
+                :label-col="{ span: 8 }"
+                :wrapper-col="{ span: 16 }"
+            >
+              <a-form-item label="API Key">
+                <a-input-password v-model:value="llmConfig.openai_api_key" placeholder="输入API Key"/>
+              </a-form-item>
 
-          <a-form-item label="API Key">
-            <a-input-password v-model:value="llmConfig.openai_api_key" placeholder="输入API Key"/>
-          </a-form-item>
+              <a-form-item label="API Base URL">
+                <a-input v-model:value="llmConfig.openai_api_base" placeholder="例如: https://api.openai.com/v1"/>
+              </a-form-item>
 
-          <a-form-item label="API Base URL">
-            <a-input v-model:value="llmConfig.openai_api_base" placeholder="例如: https://api.openai.com/v1"/>
-          </a-form-item>
+              <a-form-item label="模型名称">
+                <a-input v-model:value="llmConfig.openai_model" placeholder="例如: gpt-4o-mini"/>
+              </a-form-item>
 
-          <a-form-item label="模型名称">
-            <a-input v-model:value="llmConfig.openai_model" placeholder="例如: gpt-4o-mini"/>
-          </a-form-item>
+              <a-form-item label="最大输入Token">
+                <a-input v-model:value="llmConfig.model_max_input_tokens" placeholder="留空使用默认值"/>
+              </a-form-item>
 
-          <a-form-item label="Embedding模型">
-            <a-input v-model:value="llmConfig.openai_embedding_model" placeholder="例如: text-embedding-3-small"/>
-          </a-form-item>
+              <a-form-item label="最大输出Token">
+                <a-input v-model:value="llmConfig.model_max_output_tokens" placeholder="留空使用默认值"/>
+              </a-form-item>
+            </a-form>
+          </a-card>
 
-          <a-form-item label="Embedding维度">
-            <a-input-number v-model:value="llmConfig.embedding_dimension" :min="128" :max="4096"/>
-          </a-form-item>
+          <!-- Embedding 组 -->
+          <a-card title="🟢 Embedding 配置" :bordered="false" size="small">
+            <a-form
+                :model="llmConfig"
+                :label-col="{ span: 8 }"
+                :wrapper-col="{ span: 16 }"
+            >
+              <a-form-item label="Embedding模型">
+                <a-input v-model:value="llmConfig.openai_embedding_model" placeholder="例如: text-embedding-3-small"/>
+              </a-form-item>
 
-          <a-form-item label="最大输入Token">
-            <a-input v-model:value="llmConfig.model_max_input_tokens" placeholder="留空使用默认值"/>
-          </a-form-item>
+              <a-form-item label="Embedding维度">
+                <a-input-number v-model:value="llmConfig.embedding_dimension" :min="128" :max="4096"/>
+              </a-form-item>
+            </a-form>
+          </a-card>
 
-          <a-form-item label="最大输出Token">
-            <a-input v-model:value="llmConfig.model_max_output_tokens" placeholder="留空使用默认值"/>
-          </a-form-item>
+          <!-- Rerank 组 -->
+          <a-card title="🟣 Rerank 配置" :bordered="false" size="small">
+            <a-form
+                :model="llmConfig"
+                :label-col="{ span: 8 }"
+                :wrapper-col="{ span: 16 }"
+            >
+              <a-form-item label="启用 Rerank">
+                <a-switch v-model:checked="llmConfig.rerank_enabled"/>
+                <span style="margin-left: 8px; color: #8c8c8c;">{{ llmConfig.rerank_enabled ? '已启用' : '未启用' }}</span>
+              </a-form-item>
 
-          <a-divider/>
+              <a-form-item label="Rerank 模型名称" v-if="llmConfig.rerank_enabled">
+                <a-input v-model:value="llmConfig.rerank_model_name" placeholder="例如: rerank-sf"/>
+              </a-form-item>
+            </a-form>
+          </a-card>
 
-          <a-form-item label="启用 Rerank">
-            <a-switch v-model:checked="llmConfig.rerank_enabled"/>
-            <span style="margin-left: 8px; color: #8c8c8c;">{{ llmConfig.rerank_enabled ? '已启用' : '未启用' }}</span>
-          </a-form-item>
-
-          <a-form-item label="Rerank 模型名称" v-if="llmConfig.rerank_enabled">
-            <a-input v-model:value="llmConfig.rerank_model_name" placeholder="例如: rerank-sf"/>
-            <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
-              复用 LLM 的 API Key 和 Base URL
-            </div>
-          </a-form-item>
-
+          <!-- 保存/重置按钮 -->
           <a-form-item :wrapper-col="{ offset: 8 }">
             <a-space>
               <a-button type="primary" @click="saveLlmConfig" :loading="savingLlm">
@@ -123,7 +141,7 @@
               </a-button>
             </a-space>
           </a-form-item>
-        </a-form>
+        </a-space>
       </a-tab-pane>
 
       <!-- Redis配置 -->
