@@ -36,6 +36,25 @@
               永久删除
             </a-button>
           </template>
+          
+          <!-- 非问题按钮（在推荐和搜索结果中显示） -->
+          <template v-if="showNotQuestion" #actions>
+            <a-popconfirm
+              title="确定这不是一个面试问题吗？\n该题目将从库中永久删除"
+              ok-text="确定"
+              cancel-text="取消"
+              @confirm="$emit('notQuestion', item.id)"
+            >
+              <a-button 
+                type="link" 
+                danger 
+                size="small"
+                @click.stop
+              >
+                非问题
+              </a-button>
+            </a-popconfirm>
+          </template>
         </a-list-item>
       </template>
     </a-list>
@@ -64,10 +83,14 @@ defineProps({
   showRestore: {
     type: Boolean,
     default: false
+  },
+  showNotQuestion: {
+    type: Boolean,
+    default: false
   }
 })
 
-defineEmits(['itemClick', 'permanentDelete', 'restore'])
+defineEmits(['itemClick', 'permanentDelete', 'restore', 'notQuestion'])
 </script>
 
 <style scoped>

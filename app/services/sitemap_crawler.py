@@ -86,7 +86,7 @@ class SitemapCrawler:
                 "firecrawl_api_url": firecrawl_cfg.api_url,
                 "firecrawl_api_key": firecrawl_cfg.api_key,
                 "firecrawl_timeout": firecrawl_cfg.timeout,
-                "firecrawl_use_official": firecrawl_cfg.use_official,
+                "firecrawl_api_version": firecrawl_cfg.api_version,
             }
             self._firecrawl_service = FirecrawlMCPService.from_config(firecrawl_config)
 
@@ -307,7 +307,7 @@ class SitemapCrawler:
             firecrawl_api_url=firecrawl_cfg.api_url,
             firecrawl_api_key=firecrawl_cfg.api_key,
             firecrawl_timeout=firecrawl_cfg.timeout,
-            firecrawl_use_official=firecrawl_cfg.use_official,
+            firecrawl_api_version=firecrawl_cfg.api_version,
             firecrawl_only_main_content=firecrawl_cfg.only_main_content,
         )
 
@@ -438,7 +438,7 @@ class SitemapCrawler:
             firecrawl_api_url=firecrawl_cfg.api_url,
             firecrawl_api_key=firecrawl_cfg.api_key,
             firecrawl_timeout=firecrawl_cfg.timeout,
-            firecrawl_use_official=firecrawl_cfg.use_official,
+            firecrawl_api_version=firecrawl_cfg.api_version,
             firecrawl_only_main_content=firecrawl_cfg.only_main_content,
         )
 

@@ -140,6 +140,16 @@ class ConfigManager:
             pass
         return value
 
+    def _has_env_variables(self, config: Any) -> bool:
+        """递归检查配置中是否包含环境变量占位符"""
+        if isinstance(config, dict):
+            return any(self._has_env_variables(v) for v in config.values())
+        elif isinstance(config, list):
+            return any(self._has_env_variables(item) for item in config)
+        elif isinstance(config, str):
+            return '${' in config
+        return False
+
     def _load_config(self) -> Dict[str, Any]:
         """从配置文件目录加载配置"""
         if self._config_dir_override:
@@ -199,22 +209,37 @@ class ConfigManager:
         """
         将 YAML 默认配置同步到 Redis
         只有 Redis 中没有的模块才会同步
+        
+        注意：对于包含环境变量的配置，每次都重新解析并更新
+        排除 redis 模块，避免循环依赖问题
         """
         if not self.redis_client:
             return
 
+        # 排除的模块列表（不能存储到 Redis 中）
+        excluded_modules = {'redis'}
+
         synced_count = 0
         for module_name, module_config in self._yaml_defaults.items():
+            # 跳过排除的模块
+            if module_name in excluded_modules:
+                logger.debug(f"跳过同步 {module_name} 配置到 Redis（避免循环依赖）")
+                continue
+            
             redis_key = f"{self._redis_prefix}{module_name}"
             existing = self.redis_client.get(redis_key)
-            if existing is None:
-                # Redis 中没有，同步 YAML 默认配置
+            
+            # 检查配置中是否包含环境变量占位符
+            has_env_vars = self._has_env_variables(module_config)
+            
+            if existing is None or has_env_vars:
+                # Redis 中没有，或包含环境变量需要重新解析，则同步
                 self.redis_client.set(redis_key, json.dumps(module_config, ensure_ascii=False))
                 synced_count += 1
-                logger.debug(f"同步默认配置到 Redis: {module_name}")
+                logger.debug(f"同步配置到 Redis: {module_name} (env_vars={has_env_vars})")
 
         if synced_count > 0:
-            logger.info(f"已将 {synced_count} 个模块的默认配置同步到 Redis")
+            logger.info(f"已将 {synced_count} 个模块的配置同步到 Redis")
 
     def _get_from_redis(self, module_name: str) -> Optional[Dict[str, Any]]:
         """从 Redis 获取配置"""
@@ -248,16 +273,29 @@ class ConfigManager:
         return True
 
     def get(self, key_path: str, default: Any = None) -> Any:
-        """通过点号分隔的路径获取配置值（优先 Redis）"""
+        """
+        通过点号分隔的路径获取配置值
+        
+        注意：redis 模块直接从 YAML/内存读取，避免循环依赖
+        其他模块优先从 Redis 读取
+        
+        示例:
+            config_manager.get('redis.host')  # 从 YAML 读取
+            config_manager.get('llm.model')   # 从 Redis 读取
+        """
         keys = key_path.split('.')
         module_name = keys[0]
         
-        # 优先从 Redis 获取
-        module_config = self._get_from_redis(module_name)
-        
-        # Redis 为空则使用 YAML 默认值
-        if module_config is None:
-            module_config = self._yaml_defaults.get(module_name, {})
+        # redis 模块特殊处理：直接从内存读取
+        if module_name == 'redis':
+            module_config = self._yaml_defaults.get('redis', {})
+        else:
+            # 其他模块：优先从 Redis 获取
+            module_config = self._get_from_redis(module_name)
+            
+            # Redis 为空则使用 YAML 默认值
+            if module_config is None:
+                module_config = self._yaml_defaults.get(module_name, {})
         
         # 嵌套路径查找
         value = module_config
@@ -272,8 +310,17 @@ class ConfigManager:
         return value if value is not None else default
 
     def get_config(self, module_name: str) -> Dict[str, Any]:
-        """获取指定模块的完整配置（优先 Redis，回退 YAML）"""
-        # 优先从 Redis 获取
+        """
+        获取指定模块的完整配置
+        
+        注意：redis 模块直接从 YAML/内存读取，避免循环依赖
+        其他模块优先从 Redis 读取，回退到 YAML
+        """
+        # redis 模块特殊处理：直接从内存读取（来自 YAML）
+        if module_name == 'redis':
+            return self._yaml_defaults.get('redis', {})
+        
+        # 其他模块：优先从 Redis 获取
         redis_config = self._get_from_redis(module_name)
         if redis_config is not None:
             return redis_config
@@ -322,7 +369,15 @@ class ConfigManager:
             module_name: 配置模块名称
             config_data: 配置数据
             persist_to_file: 是否同时持久化到文件（默认 False）
+        
+        注意：redis 模块不能保存到 Redis，避免循环依赖
         """
+        # 排除 redis 模块
+        if module_name == 'redis':
+            logger.warning("无法保存 redis 配置到 Redis（避免循环依赖），已保存到内存")
+            self._yaml_defaults['redis'] = config_data
+            return True
+        
         # 保存到 Redis
         success = self._save_to_redis(module_name, config_data)
         
@@ -371,10 +426,13 @@ class ConfigManager:
 
     @property
     def all_config(self) -> Dict[str, Any]:
-        """获取所有配置（从 Redis）"""
+        """获取所有配置（从 Redis，排除 redis 模块）"""
         result = {}
         if self.redis_client:
             for module_name in self._yaml_defaults.keys():
+                # 排除 redis 模块
+                if module_name == 'redis':
+                    continue
                 redis_key = f"{self._redis_prefix}{module_name}"
                 data = self.redis_client.get(redis_key)
                 if data:

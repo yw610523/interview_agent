@@ -1324,6 +1324,40 @@ async def permanently_delete_question(question_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.delete("/api/questions/{question_id}/permanent", summary="直接从向量库永久删除题目")
+async def direct_permanent_delete(question_id: str):
+    """
+    直接从向量数据库中永久删除题目（不经过反馈系统）
+    用于标记“非问题”的场景
+    """
+    try:
+        # 直接从向量数据库中删除
+        success = await run_sync(vector_service.delete_by_id, question_id)
+
+        if not success:
+            raise HTTPException(status_code=404, detail="题目不存在")
+
+        # 同时清理反馈数据（如果存在）
+        try:
+            key = feedback_service._get_feedback_key(question_id)
+            if feedback_service.redis_client:
+                feedback_service.redis_client.delete(key)
+        except Exception:
+            pass  # 反馈数据不存在不影响主流程
+
+        logger.info(f"直接永久删除题目: {question_id}")
+        return {
+            "status": "success",
+            "message": "题目已永久删除"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Direct permanent delete error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/system/weights/update", summary="手动更新权重")
 async def update_weights():
     """
@@ -1587,7 +1621,7 @@ async def crawl_single_page(url: str):
         start_time = time.time()
         logger.info(f"开始爬取单个页面: {url}")
 
-        # 1. 扫描页面
+        # 1. 扫描页面（异步执行，不阻塞事件循环）
         logger.info("步骤1: 正在扫描页面...")
 
         # 从配置中读取 Firecrawl 设置
@@ -1605,10 +1639,10 @@ async def crawl_single_page(url: str):
             firecrawl_api_url=firecrawl_config_dict.get('api_url', ''),
             firecrawl_api_key=firecrawl_config_dict.get('api_key', ''),
             firecrawl_timeout=firecrawl_config_dict.get('timeout', 300),
-            firecrawl_use_official=firecrawl_config_dict.get('use_official', False),
+            firecrawl_api_version=firecrawl_config_dict.get('api_version', 'v2'),
             firecrawl_only_main_content=firecrawl_config_dict.get('only_main_content', True),
         )
-        scan_result = scanner.scan(url)
+        scan_result = await run_sync(scanner.scan, url)
 
         if scan_result.error:
             raise HTTPException(status_code=400, detail=f"页面扫描失败: {scan_result.error}")
@@ -1746,7 +1780,7 @@ async def crawl_single_page_stream(url: str):
                         firecrawl_api_url=firecrawl_config_dict.get('api_url', ''),
                         firecrawl_api_key=firecrawl_config_dict.get('api_key', ''),
                         firecrawl_timeout=firecrawl_config_dict.get('timeout', 300),
-                        firecrawl_use_official=firecrawl_config_dict.get('use_official', False),
+                        firecrawl_api_version=firecrawl_config_dict.get('api_version', 'v2'),
                         firecrawl_only_main_content=firecrawl_config_dict.get('only_main_content', True),
                     )
                     scan_result = scanner.scan(url)
