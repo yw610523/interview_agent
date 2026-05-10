@@ -63,8 +63,14 @@ class ConfigManager:
         logger.info("配置管理器初始化成功（Redis 配置模式）")
 
     def _init_redis_client(self):
-        """初始化 Redis 客户端"""
+        """
+        初始化 Redis 客户端
+        
+        注意：每次启动都从 YAML 配置文件重新读取 Redis 配置
+        避免使用缓存的配置导致无法连接
+        """
         try:
+            # 每次都从 YAML 文件重新加载配置（不使用缓存）
             temp_config = self._load_config()
             temp_config = self._resolve_env_variables(temp_config)
             redis_config = temp_config.get('redis', {})
