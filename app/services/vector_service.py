@@ -10,7 +10,9 @@ import os
 import logging
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
-from dotenv import load_dotenv
+
+# 导入统一配置管理器
+from app.config.config_manager import config_manager
 
 # 尝试导入 Redis
 try:
@@ -31,7 +33,6 @@ except ImportError:
     OPENAI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-load_dotenv()
 
 
 @dataclass
@@ -68,17 +69,23 @@ class VectorService:
         """
         # 1. 初始化 Redis 客户端
         try:
-            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+            # 优先从 config.yaml 读取，兼容环境变量
+            redis_url = config_manager.get_redis_url() or os.getenv("REDIS_URL", "redis://localhost:6379")
             self.redis_client = redis.from_url(redis_url)
             # 测试连接
             self.redis_client.ping()
-            logger.info("Redis 客户端初始化成功")
+            logger.info(f"Redis 客户端初始化成功 ({redis_url})")
         except Exception as e:
             logger.error(f"Redis 客户端初始化失败: {str(e)}")
 
         # 2. 初始化 OpenAI 客户端（用于生成 Embedding）
-        api_key = os.getenv("OPENAI_API_KEY")
-        api_base = os.getenv("OPENAI_API_BASE")
+        # 优先使用独立的 Embedding 配置，兼容 LLM 配置和环境变量
+        api_key = config_manager.get('llm.embedding.api_key') or \
+                  config_manager.get('llm.openai.api_key') or \
+                  os.getenv("OPENAI_API_KEY")
+        api_base = config_manager.get('llm.embedding.api_base') or \
+                   config_manager.get('llm.openai.api_base') or \
+                   os.getenv("OPENAI_API_BASE")
 
         if api_key and OPENAI_AVAILABLE:
             try:
@@ -99,19 +106,23 @@ class VectorService:
             return self._simple_hash_embedding(text)
 
         try:
+            # 优先从 config.yaml 读取 Embedding 模型名称
+            embedding_model = config_manager.get('llm.embedding.model') or \
+                             config_manager.get('llm.embedding_model') or \
+                             os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
             response = self.openai_client.embeddings.create(
                 input=text,
-                model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+                model=embedding_model,
             )
+
+            # 检查响应类型，确保不是字符串
+            if isinstance(response, str):
+                logger.error(f"Embedding API 返回字符串而不是对象: {response[:200]}")
+                raise Exception(f"API 返回字符串响应: {response[:100]}...")
 
             # 检查响应格式是否正确
             if not hasattr(response, "data") or not response.data:
-                logger.error(f"Embedding API 响应格式异常: {response}")
-                # 记录详细的错误信息
-                if isinstance(response, str):
-                    logger.error(f"API 返回字符串而不是对象: {response[:200]}")
-                else:
-                    logger.error(f"API 响应类型: {type(response)}")
+                logger.error(f"Embedding API 响应格式异常: {type(response)} - {response}")
                 raise Exception(
                     f"Embedding API 响应格式异常: {type(response)} - {response}"
                 )
@@ -122,7 +133,13 @@ class VectorService:
 
             return response.data[0].embedding
         except Exception as e:
-            logger.error(f"生成 Embedding 失败: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"生成 Embedding 失败: {error_msg}")
+            
+            # 如果是网络错误或API错误，记录详细信息
+            if "Connection" in error_msg or "HTTP" in error_msg or "307" in error_msg:
+                logger.error(f"可能是 API 端点配置错误，请检查 EMBEDDING_API_BASE 配置")
+            
             logger.warning("使用简单哈希生成向量作为备用方案")
             return self._simple_hash_embedding(text)
 
@@ -152,28 +169,61 @@ class VectorService:
             # info 可能是字典或对象，兼容处理
             if isinstance(info, dict):
                 num_docs = info.get('num_docs', 0)
+                attributes = info.get('attributes', [])
             else:
                 num_docs = getattr(info, 'num_docs', 0)
-            logger.info(f"索引 {self.index_name} 已存在，文档数: {num_docs}")
-            return True
+                attributes = getattr(info, 'attributes', [])
+            
+            # 确保 attributes 是列表
+            if not isinstance(attributes, list):
+                logger.warning(f"attributes 不是列表类型: {type(attributes)}")
+                attributes = []
+            
+            # 检查是否包含 importance_score 字段
+            has_importance_field = any(
+                (isinstance(attr, dict) and attr.get('identifier') == 'importance_score') or
+                (hasattr(attr, 'identifier') and getattr(attr, 'identifier', None) == 'importance_score')
+                for attr in attributes
+            )
+            
+            if has_importance_field:
+                logger.info(f"索引 {self.index_name} 已存在，文档数: {num_docs}")
+                return True
+            else:
+                # 索引存在但缺少 importance_score 字段，需要重建
+                logger.warning(f"索引 {self.index_name} 缺少 importance_score 字段，需要重建")
+                raise Exception("Index schema outdated")
+                
         except Exception as e:
             error_msg = str(e)
             # 如果是因为索引不存在导致的错误，则创建索引
-            if "Unknown index name" in error_msg or "does not exist" in error_msg.lower():
-                logger.info("索引不存在，准备创建")
+            if "Unknown index name" in error_msg or "does not exist" in error_msg.lower() or "schema outdated" in error_msg.lower():
+                logger.info("索引不存在或需要重建，准备创建")
             else:
                 # 其他错误，也尝试创建（可能索引损坏）
                 logger.warning(f"检查索引时出错: {error_msg}，尝试重新创建")
 
-            # 创建索引
+            # 如果索引已存在，先删除旧索引
             try:
-                embedding_dim = int(os.getenv("EMBEDDING_DIMENSION", "1536"))
+                self.redis_client.ft(self.index_name).dropindex(delete_documents=False)
+                logger.info(f"已删除旧索引 {self.index_name}")
+            except Exception as drop_error:
+                logger.debug(f"删除索引失败（可能不存在）: {str(drop_error)}")
+
+            # 创建新索引
+            try:
+                # 优先从 config.yaml 读取，兼容环境变量
+                embedding_dim = config_manager.get('llm.embedding.dimension') or \
+                               config_manager.get('llm.embedding_dimension') or \
+                               int(os.getenv("EMBEDDING_DIMENSION", "1536"))
+                from redis.commands.search.field import NumericField
                 schema = [
                     TextField("title", weight=2.0),
                     TextField("answer", weight=1.0),
                     TagField("tags"),
                     TagField("difficulty"),
                     TagField("category"),
+                    NumericField("importance_score"),
                     VectorField(
                         "embedding",
                         "FLAT",
@@ -442,6 +492,45 @@ class VectorService:
             return result > 0
         except Exception as e:
             logger.error(f"删除问题失败: {str(e)}")
+            return False
+
+    def update(self, question_id: str, question_data: Dict[str, Any]) -> bool:
+        """
+        更新题目数据
+        
+        参数:
+            question_id: 题目ID
+            question_data: 题目数据字典
+            
+        返回:
+            是否成功
+        """
+        if not self.redis_client:
+            return False
+        
+        try:
+            key = f"question:{question_id}"
+            
+            # 构建更新数据
+            data = {
+                "title": question_data.get('title', ''),
+                "answer": question_data.get('answer', ''),
+                "source_url": question_data.get('source_url', ''),
+                "tags": ",".join(question_data.get('tags', [])),
+                "importance_score": str(question_data.get('importance_score', 0)),
+                "difficulty": question_data.get('difficulty', ''),
+                "category": question_data.get('category', ''),
+            }
+            
+            self.redis_client.hset(key, mapping=data)
+            
+            # 重要：RediSearch 会自动索引 Hash 字段的变化
+            # 但为了确保索引同步，我们记录日志
+            logger.info(f"题目更新成功: {question_id}, importance_score={question_data.get('importance_score')}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"更新题目失败: {str(e)}")
             return False
 
     def get_all(self) -> List[Dict[str, Any]]:

@@ -1,12 +1,11 @@
 import asyncio
 import json
 import logging
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from queue import Queue, Empty
 from threading import Thread
-from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Dict, Any
-from datetime import datetime
 
 import uvicorn
 # 定时任务相关
@@ -17,29 +16,103 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, HttpUrl
 
 from app.config.crawler_config import (
-    CrawlerConfig,
-    get_config_from_env,
     get_scheduler_config,
+    load_crawler_config,
 )
 # 导入配置热加载管理器
 from app.services.config_hot_reload import config_reload_manager
+# 导入任务管理器
+from app.services.crawl_task_manager import crawl_task_manager, TaskStatus
+# 导入反馈服务
+from app.services.feedback_service import FeedbackService
 # 导入大模型和向量服务
 from app.services.llm_service import LLMService
 # 导入爬虫相关模块
 from app.services.sitemap_crawler import SitemapCrawler
 from app.services.vector_service import VectorService, VectorRecord
-# 导入任务管理器
-from app.services.crawl_task_manager import crawl_task_manager, TaskStatus
-# 导入反馈服务
-from app.services.feedback_service import FeedbackService
+# 导入统一配置管理器
+from app.config.config_manager import config_manager
 
 app = FastAPI(title="Interview AI Agent")
+
+def _mask_sensitive(key: str, value: str) -> str:
+    """对敏感信息进行脱敏处理"""
+    sensitive_keys = ['api_key', 'password', 'token', 'secret']
+    if any(k in key.lower() for k in sensitive_keys):
+        if not value or value == "" or value.startswith("$"):
+            return "*** (未配置)"
+        return value[:4] + "***" + value[-4:] if len(value) > 8 else "***"
+    return str(value)
+
+def _log_startup_config():
+    """启动时打印配置信息（脱敏）"""
+    logger.info("=" * 60)
+    logger.info("📋 系统配置信息（启动自检）")
+    logger.info("=" * 60)
+    
+    modules = ['llm', 'redis', 'smtp', 'content', 'crawler', 'rerank']
+    for module in modules:
+        try:
+            cfg = config_manager.get_config(module)
+            if not cfg:
+                continue
+            logger.info(f"\n--- {module.upper()} 配置 ---")
+            for k, v in cfg.items():
+                if isinstance(v, dict):
+                    for sub_k, sub_v in v.items():
+                        logger.info(f"  {module}.{sub_k}: {_mask_sensitive(sub_k, sub_v)}")
+                else:
+                    logger.info(f"  {k}: {_mask_sensitive(k, v)}")
+        except Exception as e:
+            logger.warning(f"读取 {module} 配置失败: {e}")
+    logger.info("=" * 60)
+
+@app.on_event("startup")
+async def startup_event():
+    _log_startup_config()
 
 # 配置日志
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+def _mask_sensitive(key: str, value: Any) -> str:
+    """对敏感信息进行脱敏处理"""
+    sensitive_keys = ['api_key', 'password', 'token', 'secret', 'user']
+    if any(k in key.lower() for k in sensitive_keys):
+        val_str = str(value)
+        if not val_str or val_str == "" or val_str.startswith("$"):
+            return "*** (未配置)"
+        return val_str[:4] + "***" + val_str[-4:] if len(val_str) > 8 else "***"
+    return str(value)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """启动时打印配置信息（脱敏）"""
+    logger.info("=" * 60)
+    logger.info("📋 系统配置信息（启动自检）")
+    logger.info("=" * 60)
+
+    from app.config.config_manager import config_manager
+    modules = ['llm', 'redis', 'smtp', 'content', 'crawler', 'rerank']
+    for module in modules:
+        try:
+            cfg = config_manager.get_config(module)
+            if not cfg:
+                continue
+            logger.info(f"\n--- {module.upper()} 配置 ---")
+            for k, v in cfg.items():
+                if isinstance(v, dict):
+                    for sub_k, sub_v in v.items():
+                        logger.info(f"  {module}.{sub_k}: {_mask_sensitive(sub_k, sub_v)}")
+                else:
+                    logger.info(f"  {k}: {_mask_sensitive(k, v)}")
+        except Exception as e:
+            logger.warning(f"读取 {module} 配置失败: {e}")
+    logger.info("=" * 60)
 
 # 全局变量存储最近一次爬取结果
 last_crawl_result: Optional[Dict[str, Any]] = None
@@ -68,6 +141,7 @@ def run_sync(func, *args, **kwargs):
     loop = asyncio.get_event_loop()
     return loop.run_in_executor(executor, lambda: func(*args, **kwargs))
 
+
 # 定义面试题数据模型
 
 
@@ -80,6 +154,7 @@ class InterviewQuestion(BaseModel):
     difficulty: Optional[str] = "medium"
     category: Optional[str] = ""
 
+
 # 爬取结果模型
 
 
@@ -90,6 +165,7 @@ class CrawlResult(BaseModel):
     result_count: Optional[int] = 0
     parsed_questions: Optional[int] = 0
     inserted_questions: Optional[int] = 0
+
 
 # 搜索结果模型
 
@@ -141,23 +217,8 @@ def run_crawler() -> Dict[str, Any]:
     logger.info("开始执行定时爬虫任务...")
 
     try:
-        # 加载配置
-        DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
-
-        if DEFAULT_CONFIG_PATH.exists():
-            logger.info(f"使用默认配置文件: {DEFAULT_CONFIG_PATH}")
-            config = CrawlerConfig.from_json(str(DEFAULT_CONFIG_PATH))
-        else:
-            config = get_config_from_env()
-
-        # 从环境变量覆盖 Firecrawl 配置（确保最新配置生效）
-        env_config = get_config_from_env()
-        config.use_firecrawl = env_config.use_firecrawl
-        config.firecrawl_api_url = env_config.firecrawl_api_url
-        config.firecrawl_api_key = env_config.firecrawl_api_key
-        config.firecrawl_timeout = env_config.firecrawl_timeout
-        config.firecrawl_use_official = env_config.firecrawl_use_official
-        config.firecrawl_only_main_content = env_config.firecrawl_only_main_content
+        # 加载配置（优先 YAML，兼容 JSON）
+        config = load_crawler_config()
 
         if not config.sitemap_url:
             logger.error("配置错误：未指定 Sitemap URL")
@@ -216,11 +277,6 @@ def run_crawler() -> Dict[str, Any]:
 
         # 打印报告
         crawler.print_report()
-
-        # 禁用本地保存结果，避免磁盘空间暴涨
-        # if config.save_results:
-        #     filepath = crawler.save_results()
-        #     logger.info(f"结果已保存到: {filepath}")
 
         logger.info(
             f"解析出 {total_parsed_questions} 个面试问题，成功插入 {inserted_count} 个问题到向量数据库"
@@ -310,23 +366,8 @@ async def trigger_crawl_async():
                     start_time=datetime.now().isoformat()
                 )
 
-                # 加载配置
-                DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
-
-                if DEFAULT_CONFIG_PATH.exists():
-                    logger.info(f"使用默认配置文件: {DEFAULT_CONFIG_PATH}")
-                    config = CrawlerConfig.from_json(str(DEFAULT_CONFIG_PATH))
-                else:
-                    config = get_config_from_env()
-
-                # 从环境变量覆盖 Firecrawl 配置（确保最新配置生效）
-                env_config = get_config_from_env()
-                config.use_firecrawl = env_config.use_firecrawl
-                config.firecrawl_api_url = env_config.firecrawl_api_url
-                config.firecrawl_api_key = env_config.firecrawl_api_key
-                config.firecrawl_timeout = env_config.firecrawl_timeout
-                config.firecrawl_use_official = env_config.firecrawl_use_official
-                config.firecrawl_only_main_content = env_config.firecrawl_only_main_content
+                # 加载配置（优先 YAML，兼容 JSON）
+                config = load_crawler_config()
 
                 if not config.sitemap_url:
                     raise ValueError("未指定 Sitemap URL")
@@ -678,7 +719,8 @@ async def search_questions(
                 semantic_results, exact_results, limit
             )
             results = merged_results
-            logger.info(f"混合搜索: '{query}' -> {len(results)} 个结果 (语义:{len(semantic_results)}, 精确:{len(exact_results)})")
+            logger.info(
+                f"混合搜索: '{query}' -> {len(results)} 个结果 (语义:{len(semantic_results)}, 精确:{len(exact_results)})")
 
         else:
             raise HTTPException(status_code=400, detail=f"不支持的搜索模式: {search_mode}")
@@ -696,7 +738,7 @@ async def search_questions(
             except Exception as e:
                 logger.warning(f"Rerank 失败，使用原始搜索结果: {str(e)}")
                 # Rerank 失败不影响搜索结果，继续使用原始结果
-        
+
         # 为每个结果添加反馈信息（用于前端标记）
         for result in results:
             feedback = feedback_service.get_feedback(result['id'])
@@ -705,7 +747,7 @@ async def search_questions(
                 result['is_favorite'] = feedback.is_favorite
                 result['is_wrong_book'] = feedback.is_wrong_book
                 result['hide_from_recommendation'] = feedback.hide_from_recommendation
-                
+
                 # 如果题目被隐藏，添加提示信息
                 if feedback_service.should_exclude_from_recommendation(result['id']):
                     result['status_hint'] = '已掌握' if feedback.mastery_level >= 5 else '低优先级'
@@ -816,9 +858,9 @@ async def generate_answer(question: str):
 
 @app.get("/api/questions/recommended", summary="智能推荐题目")
 async def get_recommended_questions(
-    limit: int = Query(20, ge=1, le=100, description="返回数量"),
-    exclude_mastered: bool = Query(True, description="是否排除已掌握的题目"),
-    use_rerank: bool = Query(True, description="是否使用 Rerank 模型重排序（默认开启，自动降级）")
+        limit: int = Query(20, ge=1, le=100, description="返回数量"),
+        exclude_mastered: bool = Query(True, description="是否排除已掌握的题目"),
+        use_rerank: bool = Query(True, description="是否使用 Rerank 模型重排序（默认开启，自动降级）")
 ):
     """
     基于用户反馈和艾宾浩斯曲线智能推荐题目
@@ -843,7 +885,7 @@ async def get_recommended_questions(
             # 排除已掌握的题目
             if exclude_mastered and feedback and feedback.mastery_level >= 5:
                 continue
-            
+
             # 排除从推荐中隐藏的题目（软删除）
             if feedback and feedback_service.should_exclude_from_recommendation(question['id']):
                 continue
@@ -940,6 +982,44 @@ async def get_question(question_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.put("/api/questions/{question_id}/importance", summary="更新题目重要性")
+async def update_question_importance(question_id: str,
+                                     importance_score: float = Query(..., ge=0, le=1, description="重要性评分 0-1")):
+    """
+    更新题目的重要性评分（用户自定义）
+    
+    参数:
+        question_id: 题目ID
+        importance_score: 新的重要性评分 (0-1)
+    """
+    try:
+        # 获取题目
+        question = vector_service.get_by_id(question_id)
+        if not question:
+            raise HTTPException(status_code=404, detail="题目不存在")
+
+        # 更新重要性评分
+        question['importance_score'] = importance_score
+
+        # 保存回向量数据库
+        success = vector_service.update(question_id, question)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="更新失败")
+
+        return {
+            "status": "success",
+            "message": "重要性已更新",
+            "importance_score": importance_score
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update importance error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/api/questions/{question_id}", summary="删除面试题")
 async def delete_question(question_id: str):
     """
@@ -959,16 +1039,17 @@ async def delete_question(question_id: str):
         logger.error(f"Delete question error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # ==================== 用户反馈相关 API (RESTful) ====================
 
 
 @app.post("/api/questions/{question_id}/feedback", summary="提交题目反馈")
 async def submit_feedback(
-    question_id: str,
-    mastery_level: Optional[int] = Query(None, ge=0, le=5, description="掌握程度 0-5"),
-    is_favorite: Optional[bool] = Query(None, description="是否收藏"),
-    is_wrong_book: Optional[bool] = Query(None, description="是否加入错题本"),
-    hide_from_recommendation: Optional[bool] = Query(None, description="是否从推荐中隐藏（满级时使用）")
+        question_id: str,
+        mastery_level: Optional[int] = Query(None, ge=0, le=5, description="掌握程度 0-5"),
+        is_favorite: Optional[bool] = Query(None, description="是否收藏"),
+        is_wrong_book: Optional[bool] = Query(None, description="是否加入错题本"),
+        hide_from_recommendation: Optional[bool] = Query(None, description="是否从推荐中隐藏（软删除）")
 ):
     """
     提交题目反馈
@@ -978,7 +1059,7 @@ async def submit_feedback(
         mastery_level: 掌握程度 (0-5)，0=未学习，5=完全掌握
         is_favorite: 是否收藏
         is_wrong_book: 是否加入错题本
-        hide_from_recommendation: 是否从推荐中隐藏（达到5级时可选）
+        hide_from_recommendation: 是否从推荐中隐藏（达到条件时自动或手动）
     """
     try:
         feedback_data = {}
@@ -999,7 +1080,36 @@ async def submit_feedback(
         if not success:
             raise HTTPException(status_code=500, detail="提交反馈失败")
 
-        return {"status": "success", "message": "反馈已保存"}
+        # 获取更新后的反馈和题目数据，返回给前端
+        feedback = feedback_service.get_feedback(question_id)
+        question = vector_service.get_by_id(question_id)
+
+        response_data = {"status": "success", "message": "反馈已保存"}
+
+        if feedback and question:
+            # 从题目数据中获取重要性评分
+            importance_score = question.get('importance_score', 0.5)
+
+            # 检查是否需要弹窗确认
+            auto_hide_result = feedback_service.should_auto_hide(
+                feedback.mastery_level,
+                importance_score
+            )
+            response_data['auto_hide'] = auto_hide_result
+            response_data['feedback'] = {
+                'mastery_level': feedback.mastery_level,
+                'hide_from_recommendation': feedback.hide_from_recommendation
+            }
+            response_data['question_importance'] = importance_score
+
+            # 计算下次出现时间
+            next_days = feedback_service.calculate_next_appearance_days(
+                feedback.mastery_level,
+                importance_score
+            )
+            response_data['next_appearance_days'] = next_days
+
+        return response_data
 
     except HTTPException:
         raise
@@ -1129,12 +1239,12 @@ async def remove_from_wrong_book(question_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/questions/{question_id}", summary="删除题目（软删除）")
-async def delete_question(question_id: str):
+@app.post("/api/questions/{question_id}/hide", summary="隐藏题目（软删除）")
+async def hide_question(question_id: str):
     """
-    删除题目（软删除，保留30天）
+    隐藏题目（软删除，保留30天）
     
-    删除后的题目：
+    隐藏后的题目：
     - 不会出现在推荐列表中
     - 搜索时仍会出现，但标记为“已掌握”或“低优先级”
     - Rerank排序时会靠后
@@ -1155,6 +1265,62 @@ async def delete_question(question_id: str):
         raise
     except Exception as e:
         logger.error(f"Delete question error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/users/me/hidden-questions", summary="获取已掌握（软删除）的题目")
+async def get_hidden_questions():
+    """
+    获取已隐藏（软删除）的题目列表
+    这些题目可以在这里进行永久删除
+    """
+    try:
+        hidden_ids = await run_sync(feedback_service.get_hidden_questions)
+
+        if not hidden_ids:
+            return {"questions": [], "total": 0}
+
+        # 获取所有题目
+        all_questions = await run_sync(vector_service.get_all)
+        hidden_questions = [q for q in all_questions if q['id'] in hidden_ids]
+
+        return {
+            "questions": hidden_questions,
+            "total": len(hidden_questions)
+        }
+
+    except Exception as e:
+        logger.error(f"Get hidden questions error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/users/me/hidden-questions/{question_id}", summary="永久删除题目")
+async def permanently_delete_question(question_id: str):
+    """
+    永久删除题目（从向量数据库中删除）
+    只能在“已掌握”列表中操作
+    """
+    try:
+        # 先从反馈中删除
+        key = feedback_service._get_feedback_key(question_id)
+        if feedback_service.redis_client:
+            feedback_service.redis_client.delete(key)
+
+        # 再从向量数据库中删除
+        success = await run_sync(vector_service.delete_by_id, question_id)
+
+        if not success:
+            raise HTTPException(status_code=404, detail="题目不存在")
+
+        return {
+            "status": "success",
+            "message": "题目已永久删除"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Permanently delete question error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1425,20 +1591,22 @@ async def crawl_single_page(url: str):
         logger.info("步骤1: 正在扫描页面...")
 
         # 从配置中读取 Firecrawl 设置
-        from app.config.crawler_config import get_config_from_env
-        crawler_config = get_config_from_env()
-
+        from app.config.config_manager import config_manager
+        
+        crawler_config_dict = config_manager.get_config('crawler')
+        firecrawl_config_dict = config_manager.get_config('firecrawl')
+        
         scanner = URLScanner(
-            timeout=crawler_config.timeout,
-            follow_redirects=crawler_config.follow_redirects,
-            verify_ssl=crawler_config.verify_ssl,
-            max_content_length=crawler_config.max_content_length,
-            use_firecrawl=crawler_config.use_firecrawl,
-            firecrawl_api_url=crawler_config.firecrawl_api_url,
-            firecrawl_api_key=crawler_config.firecrawl_api_key,
-            firecrawl_timeout=crawler_config.firecrawl_timeout,
-            firecrawl_use_official=crawler_config.firecrawl_use_official,
-            firecrawl_only_main_content=crawler_config.firecrawl_only_main_content,
+            timeout=crawler_config_dict.get('timeout', 30),
+            follow_redirects=True,
+            verify_ssl=True,
+            max_content_length=5 * 1024 * 1024,
+            use_firecrawl=firecrawl_config_dict.get('enabled', False),
+            firecrawl_api_url=firecrawl_config_dict.get('api_url', ''),
+            firecrawl_api_key=firecrawl_config_dict.get('api_key', ''),
+            firecrawl_timeout=firecrawl_config_dict.get('timeout', 300),
+            firecrawl_use_official=firecrawl_config_dict.get('use_official', False),
+            firecrawl_only_main_content=firecrawl_config_dict.get('only_main_content', True),
         )
         scan_result = scanner.scan(url)
 
@@ -1564,20 +1732,22 @@ async def crawl_single_page_stream(url: str):
                     log_callback("正在扫描页面...", 10, "scanning")
 
                     # 1. 扫描页面
-                    from app.config.crawler_config import get_config_from_env
-                    crawler_config = get_config_from_env()
-
+                    from app.config.config_manager import config_manager
+                    
+                    crawler_config_dict = config_manager.get_config('crawler')
+                    firecrawl_config_dict = config_manager.get_config('firecrawl')
+                    
                     scanner = URLScanner(
-                        timeout=crawler_config.timeout,
-                        follow_redirects=crawler_config.follow_redirects,
-                        verify_ssl=crawler_config.verify_ssl,
-                        max_content_length=crawler_config.max_content_length,
-                        use_firecrawl=crawler_config.use_firecrawl,
-                        firecrawl_api_url=crawler_config.firecrawl_api_url,
-                        firecrawl_api_key=crawler_config.firecrawl_api_key,
-                        firecrawl_timeout=crawler_config.firecrawl_timeout,
-                        firecrawl_use_official=crawler_config.firecrawl_use_official,
-                        firecrawl_only_main_content=crawler_config.firecrawl_only_main_content,
+                        timeout=crawler_config_dict.get('timeout', 30),
+                        follow_redirects=True,
+                        verify_ssl=True,
+                        max_content_length=5 * 1024 * 1024,
+                        use_firecrawl=firecrawl_config_dict.get('enabled', False),
+                        firecrawl_api_url=firecrawl_config_dict.get('api_url', ''),
+                        firecrawl_api_key=firecrawl_config_dict.get('api_key', ''),
+                        firecrawl_timeout=firecrawl_config_dict.get('timeout', 300),
+                        firecrawl_use_official=firecrawl_config_dict.get('use_official', False),
+                        firecrawl_only_main_content=firecrawl_config_dict.get('only_main_content', True),
                     )
                     scan_result = scanner.scan(url)
 
@@ -1622,7 +1792,7 @@ async def crawl_single_page_stream(url: str):
                     log_callback("正在使用AI识别面试问题...", 30, "analyzing")
 
                     # 临时重定向日志输出到SSE（推送所有日志）
-        # original_handlers = logger.handlers.copy()
+                    # original_handlers = logger.handlers.copy()
 
                     class SSELogHandler(logging.Handler):
 
@@ -1771,12 +1941,8 @@ async def get_crawler_config():
     获取当前爬虫配置
     """
     try:
-        DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
-
-        if DEFAULT_CONFIG_PATH.exists():
-            config = CrawlerConfig.from_json(str(DEFAULT_CONFIG_PATH))
-        else:
-            config = get_config_from_env()
+        # 加载配置（优先 YAML，兼容 JSON）
+        config = load_crawler_config()
 
         return {
             "status": "success",
@@ -1790,26 +1956,27 @@ async def get_crawler_config():
 @app.put("/api/config", summary="更新爬虫配置")
 async def update_crawler_config(config_data: Dict[str, Any]):
     """
-    更新爬虫配置并保存到文件
+    更新爬虫配置并保存到独立配置文件
     """
     try:
-        DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
+        # 使用 ConfigManager 保存到运行时配置（不写入文件）
+        from app.config.config_manager import config_manager
 
-        # 创建新配置
-        config = CrawlerConfig.from_dict(config_data)
+        success = config_manager.save_config('crawler', config_data, persist_to_file=False)
+        if not success:
+            raise HTTPException(status_code=500, detail="保存配置文件失败")
 
-        # 保存到文件
-        config.to_json(str(DEFAULT_CONFIG_PATH))
-
-        logger.info(f"配置已更新并保存到: {DEFAULT_CONFIG_PATH}")
+        # 热加载配置
+        reload_success = config_reload_manager.reload_crawler_config()
 
         return {
             "status": "success",
-            "message": "配置更新成功",
-            "config": config.to_dict()
+            "message": "爬虫配置已更新（运行时生效，重启后恢复为配置文件默认值）",
+            "hot_reload": reload_success,
+            "config": config_data
         }
     except Exception as e:
-        logger.error(f"更新配置失败: {str(e)}")
+        logger.error(f"更新爬虫配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1858,36 +2025,44 @@ async def update_llm_config(config_data: Dict[str, Any]):
     更新模型配置（支持热加载，无需重启）
     """
     try:
-        import os
-        from dotenv import set_key, find_dotenv
+        from app.config.config_manager import config_manager
 
-        # 加载环境变量
-        dotenv_path = find_dotenv()
-        if not dotenv_path:
-            dotenv_path = '.env'
+        # 转换前端字段名到配置文件字段名
+        config_mapping = {
+            'openai_api_key': 'openai_api_key',
+            'openai_api_base': 'openai_api_base',
+            'openai_model': 'model',
+            'openai_embedding_model': 'embedding_model',
+            'embedding_dimension': 'embedding_dimension',
+            'model_max_input_tokens': 'max_input_tokens',
+            'model_max_output_tokens': 'max_output_tokens',
+            'rerank_enabled': 'rerank_enabled',
+            'rerank_model_name': 'rerank_model_name'
+        }
 
-        # 更新.env文件中的配置
+        # 构建新的 LLM 配置
+        new_llm_config = {}
         for key, value in config_data.items():
-            env_key = key.upper()
-            if value is not None and value != '':
-                set_key(dotenv_path, env_key, str(value))
-            else:
-                # 如果值为空，删除该配置项
-                if os.getenv(env_key):
-                    # 读取文件并删除对应行
-                    with open(dotenv_path, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()
-                    with open(dotenv_path, 'w', encoding='utf-8') as f:
-                        for line in lines:
-                            if not line.startswith(f'{env_key}='):
-                                f.write(line)
+            if key in config_mapping:
+                yaml_key = config_mapping[key]
+                if value is not None and value != '' and value != '********':
+                    # 转换数字类型
+                    if key in ['embedding_dimension', 'model_max_input_tokens', 'model_max_output_tokens']:
+                        new_llm_config[yaml_key] = int(value)
+                    else:
+                        new_llm_config[yaml_key] = value
+
+        # 使用 ConfigManager 保存到运行时配置（不写入文件）
+        success = config_manager.save_config('llm', new_llm_config, persist_to_file=False)
+        if not success:
+            raise HTTPException(status_code=500, detail="保存配置文件失败")
 
         # 热加载配置
         reload_success = config_reload_manager.reload_llm_config()
 
         return {
             "status": "success",
-            "message": "模型配置已更新" + ("（已热加载，立即生效）" if reload_success else "（请重启服务使配置生效）"),
+            "message": "模型配置已更新（运行时生效，重启后恢复为配置文件默认值）",
             "hot_reload": reload_success,
             "config": config_data
         }
@@ -1895,8 +2070,69 @@ async def update_llm_config(config_data: Dict[str, Any]):
         logger.error(f"更新模型配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Redis配置API已移除 - Redis运行在Docker容器内，使用固定的 redis://redis:6379
-# 如需从宿主机访问，可在 .env 中修改 REDIS_PORT
+
+# Redis配置API
+@app.get("/api/redis-config", summary="获取Redis配置")
+async def get_redis_config_api():
+    """
+    获取 Redis 配置
+    """
+    try:
+        from app.config.config_manager import config_manager
+        redis_data = config_manager.get_config('redis')
+        
+        return {
+            "status": "success",
+            "config": {
+                "host": redis_data.get('host', 'localhost'),
+                "port": redis_data.get('port', 6379),
+                "password": redis_data.get('password', '')
+            }
+        }
+    except Exception as e:
+        logger.error(f"获取Redis配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/redis-config", summary="更新Redis配置")
+async def update_redis_config(config_data: Dict[str, Any]):
+    """
+    更新 Redis 配置（支持热加载，无需重启）
+    """
+    try:
+        from app.config.config_manager import config_manager
+
+        # 构建新的 Redis 配置
+        new_redis_config = {}
+        for key in ['host', 'port', 'password']:
+            if key in config_data:
+                value = config_data[key]
+                # 跳过密码占位符
+                if key == 'password' and value == '********':
+                    continue
+                # 转换端口为整数
+                if key == 'port':
+                    new_redis_config[key] = int(value)
+                else:
+                    new_redis_config[key] = value
+
+        # 使用 ConfigManager 保存到运行时配置（不写入文件）
+        success = config_manager.save_config('redis', new_redis_config, persist_to_file=False)
+        if not success:
+            raise HTTPException(status_code=500, detail="保存配置文件失败")
+
+        # 热加载配置
+        reload_success = config_reload_manager.reload_redis_config()
+
+        return {
+            "status": "success",
+            "message": "Redis配置已更新（运行时生效，重启后恢复为配置文件默认值）",
+            "hot_reload": reload_success,
+            "config": config_data
+        }
+    except Exception as e:
+        logger.error(f"更新Redis配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.put("/api/email-config", summary="更新邮件配置")
@@ -1905,34 +2141,40 @@ async def update_email_config(config_data: Dict[str, Any]):
     更新邮件配置（支持热加载，无需重启）
     """
     try:
-        from dotenv import set_key, find_dotenv
+        from app.config.config_manager import config_manager
 
-        # 加载环境变量
-        dotenv_path = find_dotenv()
-        if not dotenv_path:
-            dotenv_path = '.env'
-
-        # 更新邮件配置
+        # 转换前端字段名到配置文件字段名
         email_mapping = {
-            'smtp_server': 'SMTP_SERVER',
-            'smtp_port': 'SMTP_PORT',
-            'smtp_user': 'SMTP_USER',
-            'smtp_password': 'SMTP_PASSWORD',
-            'smtp_test_user': 'SMTP_TEST_USER'
+            'smtp_server': 'server',
+            'smtp_port': 'port',
+            'smtp_user': 'user',
+            'smtp_password': 'password',
+            'smtp_test_user': 'test_user'
         }
 
+        # 构建新的 SMTP 配置
+        new_smtp_config = {}
         for key, value in config_data.items():
             if key in email_mapping:
-                env_key = email_mapping[key]
+                yaml_key = email_mapping[key]
                 if value is not None and value != '' and value != '********':
-                    set_key(dotenv_path, env_key, str(value))
+                    # 转换端口为整数
+                    if key == 'smtp_port':
+                        new_smtp_config[yaml_key] = int(value)
+                    else:
+                        new_smtp_config[yaml_key] = value
+
+        # 使用 ConfigManager 保存到运行时配置（不写入文件）
+        success = config_manager.save_config('smtp', new_smtp_config, persist_to_file=False)
+        if not success:
+            raise HTTPException(status_code=500, detail="保存配置文件失败")
 
         # 热加载配置
         reload_success = config_reload_manager.reload_email_config()
 
         return {
             "status": "success",
-            "message": "邮件配置已更新" + ("（已热加载，立即生效）" if reload_success else "（请重启服务使配置生效）"),
+            "message": "邮件配置已更新（运行时生效，重启后恢复为配置文件默认值）",
             "hot_reload": reload_success,
             "config": config_data
         }
@@ -1947,13 +2189,14 @@ async def test_email():
     测试邮件发送功能
     """
     try:
-        import os
         from app.services.email_service import send_interview_email
+        from app.config.config_manager import config_manager
 
         # 获取测试邮箱
-        test_user = os.getenv("SMTP_TEST_USER")
+        smtp_config = config_manager.get_config('smtp')
+        test_user = smtp_config.get('test_user')
         if not test_user:
-            raise HTTPException(status_code=400, detail="未配置测试邮箱(SMTP_TEST_USER)")
+            raise HTTPException(status_code=400, detail="未配置测试邮箱(smtp.test_user)")
 
         # 创建测试问题
         test_questions = [
@@ -1991,24 +2234,38 @@ async def update_rerank_config(config_data: Dict[str, Any]):
     更新 Rerank 配置（支持热加载）
     """
     try:
-        from dotenv import set_key, find_dotenv
+        import yaml
+        from pathlib import Path
 
-        # 加载环境变量
-        dotenv_path = find_dotenv()
-        if not dotenv_path:
-            dotenv_path = '.env'
+        # 读取当前配置文件
+        config_path = Path(__file__).parent.parent / "config.yaml"
+        if not config_path.exists():
+            raise HTTPException(status_code=500, detail="配置文件不存在")
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+
+        # 确保 rerank 部分存在
+        if 'rerank' not in config:
+            config['rerank'] = {}
 
         # 更新 Rerank 配置
         rerank_mapping = {
-            'enabled': 'RERANK_ENABLED',
-            'model_name': 'RERANK_MODEL'
+            'enabled': 'enabled',
+            'model_name': 'model'
         }
 
         for key, value in config_data.items():
             if key in rerank_mapping:
-                env_key = rerank_mapping[key]
+                yaml_key = rerank_mapping[key]
                 if value is not None and value != '':
-                    set_key(dotenv_path, env_key, str(value))
+                    config['rerank'][yaml_key] = value
+
+        # 保存配置文件
+        with open(config_path, 'w', encoding='utf-8') as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+
+        logger.info("Rerank 配置已保存到 config.yaml")
 
         # 重新加载反馈服务中的 Rerank 配置
         feedback_service.reload_rerank_config()
@@ -2023,58 +2280,150 @@ async def update_rerank_config(config_data: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/content-config", summary="获取内容处理配置")
+async def get_content_config_api():
+    """
+    获取内容处理配置（滑动窗口切分策略）
+    """
+    try:
+        from app.config.config_manager import config_manager
+        content_data = config_manager.get_config('content')
+
+        return {
+            "status": "success",
+            "config": {
+                "chunk_size": content_data.get('chunk_size', 512),
+                "chunk_overlap": content_data.get('chunk_overlap', 128),
+                "separators": content_data.get('separators', ['\n\n', '\n', '。', '！', '？', '.', '!', '?', ' ']),
+                "chunking_mode": content_data.get('chunking_mode', 'semantic'),
+                "max_chunks_per_page": content_data.get('max_chunks_per_page', 100),
+                "min_chunk_length": content_data.get('min_chunk_length', 100),
+            }
+        }
+    except Exception as e:
+        logger.error(f"获取内容处理配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/content-config", summary="更新内容处理配置")
+async def update_content_config(config_data: Dict[str, Any]):
+    """
+    更新内容处理配置（支持热加载，无需重启）
+    """
+    try:
+        from app.config.config_manager import config_manager
+
+        # 构建新的内容处理配置
+        new_content_config = {}
+        for key in ['chunk_size', 'chunk_overlap', 'chunking_mode', 'max_chunks_per_page', 'min_chunk_length']:
+            if key in config_data:
+                value = config_data[key]
+                # 转换数值类型为整数
+                if key in ['chunk_size', 'chunk_overlap', 'max_chunks_per_page', 'min_chunk_length']:
+                    new_content_config[key] = int(value)
+                else:
+                    new_content_config[key] = value
+
+        # 处理分隔符列表
+        if 'separators' in config_data and isinstance(config_data['separators'], list):
+            new_content_config['separators'] = config_data['separators']
+
+        # 使用 ConfigManager 保存到运行时配置（不写入文件）
+        success = config_manager.save_config('content', new_content_config, persist_to_file=False)
+        if not success:
+            raise HTTPException(status_code=500, detail="保存配置文件失败")
+
+        return {
+            "status": "success",
+            "message": "内容处理配置已更新（运行时生效，重启后恢复为配置文件默认值）",
+            "hot_reload": True
+        }
+    except Exception as e:
+        logger.error(f"更新内容处理配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/system-config", summary="获取系统配置")
 async def get_system_config():
     """
     获取所有系统配置（按类别分组）
     """
     try:
-        import os
-        from dotenv import load_dotenv
-        load_dotenv()
+        # 导入统一配置管理器
+        from app.config.config_manager import config_manager
 
         # 爬虫配置
-        DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
-        if DEFAULT_CONFIG_PATH.exists():
-            crawler_config = CrawlerConfig.from_json(str(DEFAULT_CONFIG_PATH))
-        else:
-            crawler_config = get_config_from_env()
+        crawler_config = load_crawler_config()
 
-        # 模型配置
+        # 模型配置：从 llm.yaml 读取（包含 Rerank 配置）
+        llm_config_data = config_manager.get_config('llm')
+        
+        # 从嵌套结构中读取配置
+        openai_config = llm_config_data.get('openai', {})
+        embedding_config = llm_config_data.get('embedding', {})
+        rerank_config_nested = llm_config_data.get('rerank', {})
+        
         llm_config = {
-            "openai_api_key": os.getenv("OPENAI_API_KEY", ""),
-            "openai_api_base": os.getenv("OPENAI_API_BASE", ""),
-            "openai_model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            "openai_embedding_model": os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
-            "embedding_dimension": int(os.getenv("EMBEDDING_DIMENSION", "1536")),
-            "model_max_input_tokens": os.getenv("MODEL_MAX_INPUT_TOKENS", ""),
-            "model_max_output_tokens": os.getenv("MODEL_MAX_OUTPUT_TOKENS", ""),
+            "openai_api_key": openai_config.get('api_key', ''),
+            "openai_api_base": openai_config.get('api_base', ''),
+            "openai_model": openai_config.get('model', 'gpt-4o-mini'),
+            "openai_embedding_model": embedding_config.get('model', 'text-embedding-3-small'),
+            "embedding_dimension": embedding_config.get('dimension', 1536),
+            "model_max_input_tokens": str(openai_config.get('max_input_tokens', '')),
+            "model_max_output_tokens": str(openai_config.get('max_output_tokens', '')),
+            "rerank_enabled": rerank_config_nested.get('enabled', False),
+            "rerank_model_name": rerank_config_nested.get('model', 'BAAI/bge-reranker-v2-m3'),
         }
 
-        # Rerank 配置
+        # Rerank 配置：兼容旧版本，从 rerank.yaml 读取（如果存在）
+        rerank_config_data = config_manager.get_config('rerank')
+        rerank_enabled = rerank_config_data.get('enabled', False)
+        if isinstance(rerank_enabled, str):
+            rerank_enabled = rerank_enabled.lower() in ('true', '1', 'yes')
+
+        # 如果 rerank.yaml 中有配置，优先使用（向后兼容）
+        if rerank_config_data.get('enabled') is not None:
+            llm_config['rerank_enabled'] = rerank_enabled
+            llm_config['rerank_model_name'] = rerank_config_data.get('model', llm_config['rerank_model_name'])
+
         rerank_config = {
-            "enabled": os.getenv("RERANK_ENABLED", "false").lower() == "true",
-            "model_name": os.getenv("RERANK_MODEL", "rerank-sf"),
+            "enabled": llm_config['rerank_enabled'],
+            "model_name": llm_config['rerank_model_name'],
             "description": "Rerank 模型复用 LLM 的 API Key 和 Base URL"
         }
 
-        # Redis配置（固定值）
+        # Redis配置：从 redis.yaml 读取
+        redis_config_data = config_manager.get_config('redis')
         redis_config = {
-            "redis_url": "redis://redis:6379",
+            "host": redis_config_data.get('host', 'localhost'),
+            "port": redis_config_data.get('port', 6379),
+            "password": redis_config_data.get('password', ''),
             "description": "Redis运行在Docker容器内，App自动连接"
         }
 
-        # 邮件配置
+        # 邮件配置：从 smtp.yaml 读取
+        smtp_config_data = config_manager.get_config('smtp')
         email_config = {
-            "smtp_server": os.getenv("SMTP_SERVER", ""),
-            "smtp_port": int(os.getenv("SMTP_PORT", "587")),
-            "smtp_user": os.getenv("SMTP_USER", ""),
-            "smtp_password": os.getenv("SMTP_PASSWORD", ""),
-            "smtp_test_user": os.getenv("SMTP_TEST_USER", ""),
+            "smtp_server": smtp_config_data.get('server', ''),
+            "smtp_port": smtp_config_data.get('port', 587),
+            "smtp_user": smtp_config_data.get('user', ''),
+            "smtp_password": smtp_config_data.get('password', ''),
+            "smtp_test_user": smtp_config_data.get('test_user', ''),
         }
 
         # 定时任务配置
         scheduler_cfg = get_scheduler_config()
+
+        # 内容处理配置：从 content.yaml 读取
+        content_config_data = config_manager.get_config('content')
+        content_config = {
+            "chunk_size": content_config_data.get('chunk_size', 512),
+            "chunk_overlap": content_config_data.get('chunk_overlap', 128),
+            "separators": content_config_data.get('separators', ['\n\n', '\n', '。', '！', '？', '.', '!', '?', ' ']),
+            "chunking_mode": content_config_data.get('chunking_mode', 'semantic'),
+            "max_chunks_per_page": content_config_data.get('max_chunks_per_page', 100),
+            "min_chunk_length": content_config_data.get('min_chunk_length', 100),
+        }
 
         return {
             "status": "success",
@@ -2085,11 +2434,90 @@ async def get_system_config():
                 "redis": redis_config,
                 "email": email_config,
                 "scheduler": scheduler_cfg,
+                "content": content_config,
             }
         }
     except Exception as e:
         logger.error(f"获取系统配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/prompts", summary="获取提示词配置")
+async def get_prompts_config():
+    """
+    获取所有 LLM 提示词配置
+    """
+    try:
+        from app.config.config_manager import config_manager
+
+        # 获取提示词配置
+        question_extraction = config_manager.get('prompts.question_extraction_system', '')
+        answer_generation = config_manager.get('prompts.answer_generation_system', '')
+
+        # 确保返回的是字符串类型（处理 None 的情况）
+        prompts = {
+            "question_extraction_system": str(question_extraction) if question_extraction else '',
+            "answer_generation_system": str(answer_generation) if answer_generation else '',
+        }
+
+        return {
+            "status": "success",
+            "prompts": prompts
+        }
+    except Exception as e:
+        logger.error(f"获取提示词配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/prompts", summary="更新提示词配置")
+async def update_prompts_config(request: dict):
+    """
+    更新 LLM 提示词配置并保存到 prompts.yaml
+    """
+    try:
+        from app.config.config_manager import config_manager
+
+        # 验证请求数据
+        if not isinstance(request, dict):
+            raise HTTPException(status_code=400, detail="请求数据格式错误")
+
+        # 获取要更新的提示词
+        question_extraction = request.get('question_extraction_system')
+        answer_generation = request.get('answer_generation_system')
+
+        if not question_extraction and not answer_generation:
+            raise HTTPException(status_code=400, detail="至少需要提供一个提示词")
+
+        # 获取当前 prompts 配置并更新
+        current_prompts = config_manager.get('prompts', {})
+        if not isinstance(current_prompts, dict):
+            current_prompts = {}
+
+        if question_extraction is not None:
+            current_prompts['question_extraction_system'] = question_extraction
+            logger.info("已更新面试题提取提示词")
+
+        if answer_generation is not None:
+            current_prompts['answer_generation_system'] = answer_generation
+            logger.info("已更新答案生成提示词")
+
+        # 使用 ConfigManager 保存到运行时配置（不写入文件）
+        success = config_manager.save_config('prompts', current_prompts, persist_to_file=False)
+        if not success:
+            raise HTTPException(status_code=500, detail="保存配置文件失败")
+
+        logger.info("提示词配置已保存到 prompts.yaml")
+
+        return {
+            "status": "success",
+            "message": "提示词配置已更新（运行时生效，重启后恢复为配置文件默认值）"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新提示词配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")
+
 
 # 定时任务调度器
 scheduler = BackgroundScheduler()
@@ -2098,6 +2526,7 @@ scheduler = BackgroundScheduler()
 scheduler_config = get_scheduler_config()
 SCHEDULER_HOUR = scheduler_config["hour"]
 SCHEDULER_MINUTE = scheduler_config["minute"]
+
 
 # 添加定时任务：每天指定时间执行
 
@@ -2108,6 +2537,7 @@ def scheduled_crawl():
     定时爬虫任务（每天指定时间执行）
     """
     run_crawler()
+
 
 # 添加定时任务：每天凌晨2点更新题目权重
 

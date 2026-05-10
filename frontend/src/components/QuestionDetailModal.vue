@@ -63,13 +63,15 @@
               🔗 查看来源
             </a>
           </a-descriptions-item>
-          <a-descriptions-item v-if="question.importance_score" label="重要性评分">
-            <a-progress 
-              :percent="Math.round(question.importance_score * 100)" 
-              :stroke-color="{
-                '0%': '#108ee9',
-                '100%': '#87d068',
-              }"
+          <a-descriptions-item label="重要性评分">
+            <a-slider 
+              v-model:value="question.importance_score" 
+              :min="0" 
+              :max="1" 
+              :step="0.05"
+              :marks="{0: '0%', 0.25: '25%', 0.5: '50%', 0.75: '75%', 1: '100%'}"
+              @change="handleImportanceChange"
+              :disabled="submittingFeedback"
               style="width: 200px;"
             />
           </a-descriptions-item>
@@ -119,11 +121,11 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { CloseOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons-vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import { feedbackApi } from '../services'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 
 const props = defineProps({
   modelValue: {
@@ -319,18 +321,89 @@ const handleMasteryChange = async (value) => {
   
   submittingFeedback.value = true
   try {
-    await feedbackApi.submitFeedback(props.question.id, {
+    const res = await feedbackApi.submitFeedback(props.question.id, {
       masteryLevel: value
     })
-    message.success('掌握程度已更新')
-    // 重新加载反馈数据
-    await loadFeedback()
+    
+    // 检查是否需要弹窗确认
+    if (res.auto_hide && res.auto_hide.need_confirm) {
+      // 需要用户确认
+      Modal.confirm({
+        title: '题目已掌握',
+        content: `该题重要性为${Math.round(res.question_importance * 100)}%，已达到${getMasteryText(value)}水平。是否将其从推荐中隐藏？`,
+        okText: '隐藏（30天后可恢复）',
+        cancelText: '继续显示',
+        onOk: async () => {
+          await feedbackApi.submitFeedback(props.question.id, {
+            hideFromRecommendation: true
+          })
+          message.success('题目已隐藏')
+          await loadFeedback()
+          // 通知父组件刷新（使用 hidden 类型表示题目被隐藏）
+          emit('feedback-changed', {
+            questionId: props.question.id,
+            type: 'hidden',
+            value: true
+          })
+        },
+        onCancel: () => {
+          message.info('题目将继续出现在推荐中')
+        }
+      })
+    } else if (res.auto_hide && res.auto_hide.should_hide) {
+      // 自动软删除
+      message.success(`题目已自动隐藏（重要性${Math.round(res.question_importance * 100)}%，${getMasteryText(value)}）`)
+      await loadFeedback()
+      // 通知父组件刷新（传递掌握程度）
+      emit('feedback-changed', {
+        questionId: props.question.id,
+        type: 'mastery',
+        value: value
+      })
+    } else {
+      // 普通更新
+      message.success('掌握程度已更新')
+      await loadFeedback()
+      // 通知父组件刷新（传递掌握程度）
+      emit('feedback-changed', {
+        questionId: props.question.id,
+        type: 'mastery',
+        value: value
+      })
+    }
   } catch (error) {
     message.error('更新失败')
     console.error(error)
   } finally {
     submittingFeedback.value = false
   }
+}
+
+// 处理重要性变化
+let importanceTimer = null
+const handleImportanceChange = async (value) => {
+  if (!props.question?.id) return
+  
+  // 防抖：延迟500ms后提交
+  clearTimeout(importanceTimer)
+  importanceTimer = setTimeout(async () => {
+    submittingFeedback.value = true
+    try {
+      await feedbackApi.updateImportance(props.question.id, value)
+      message.success('重要性已更新')
+      // 通知父组件刷新
+      emit('feedback-changed', {
+        questionId: props.question.id,
+        type: 'importance',
+        value: value
+      })
+    } catch (error) {
+      message.error('更新失败')
+      console.error(error)
+    } finally {
+      submittingFeedback.value = false
+    }
+  }, 500)
 }
 
 // 切换收藏状态

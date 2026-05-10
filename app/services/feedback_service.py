@@ -15,8 +15,6 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
-from dotenv import load_dotenv
-
 # 尝试导入 Redis
 try:
     import redis
@@ -26,7 +24,6 @@ except ImportError:
     REDIS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-load_dotenv()
 
 
 @dataclass
@@ -37,8 +34,9 @@ class QuestionFeedback:
     mastery_level: int = 0  # 掌握程度 0-5 (0=未学习, 5=完全掌握)
     is_favorite: bool = False  # 是否收藏
     is_wrong_book: bool = False  # 是否在错题本
-    hide_from_recommendation: bool = False  # 是否从推荐中隐藏（满级后用户选择）
+    hide_from_recommendation: bool = False  # 是否从推荐中隐藏（软删除）
     hidden_at: Optional[str] = None  # 隐藏时间（用于30天后自动恢复）
+    last_reviewed_at: Optional[str] = None  # 上次复习时间
     created_at: Optional[str] = None  # 创建时间
     updated_at: Optional[str] = None  # 更新时间
 
@@ -51,45 +49,66 @@ class FeedbackService:
         self.openai_client = None
         self.rerank_enabled = False
         self.rerank_model = "rerank-sf"
+        self.rerank_api_base = ""  # 保存 Rerank API base URL
         self._init_redis()
         self._init_rerank()
 
     def _init_redis(self):
         """初始化 Redis 客户端"""
         try:
-            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+            from app.config.config_manager import config_manager
+            
+            # 从 config.yaml 读取 Redis 配置并构建 URL
+            redis_url = config_manager.get_redis_url()
             self.redis_client = redis.from_url(redis_url)
             self.redis_client.ping()
-            logger.info("FeedbackService: Redis 客户端初始化成功")
+            logger.info(f"FeedbackService: Redis 客户端初始化成功 ({redis_url})")
         except Exception as e:
             logger.error(f"FeedbackService: Redis 客户端初始化失败: {str(e)}")
 
     def _init_rerank(self):
-        """初始化 Rerank 客户端（复用 LLM 的配置）"""
+        """初始化 Rerank 客户端（使用独立的配置）"""
         try:
             from openai import OpenAI
+            
+            # 导入统一配置管理器
+            from app.config.config_manager import config_manager
 
-            # 读取 Rerank 配置
-            self.rerank_enabled = os.getenv("RERANK_ENABLED", "false").lower() == "true"
-            self.rerank_model = os.getenv("RERANK_MODEL", "rerank-sf")
+            # 读取 LLM 配置（包含 rerank 嵌套结构）
+            llm_config = config_manager.get_config('llm')
+            
+            # 支持嵌套结构和平铺结构
+            if 'rerank' in llm_config:
+                # 嵌套结构
+                rerank_cfg = llm_config.get('rerank', {})
+                self.rerank_enabled = rerank_cfg.get('enabled', False)
+                self.rerank_model = rerank_cfg.get('model', 'BAAI/bge-reranker-v2-m3')
+                rerank_api_key = rerank_cfg.get('api_key', '')
+                rerank_api_base = rerank_cfg.get('api_base', '')
+            else:
+                # 平铺结构（向后兼容）
+                rerank_enabled = llm_config.get('rerank_enabled', False)
+                if isinstance(rerank_enabled, str):
+                    rerank_enabled = rerank_enabled.lower() in ('true', '1', 'yes')
+                self.rerank_enabled = rerank_enabled
+                self.rerank_model = llm_config.get('rerank_model_name', 'BAAI/bge-reranker-v2-m3')
+                rerank_api_key = llm_config.get('rerank_api_key', '')
+                rerank_api_base = llm_config.get('rerank_api_base', '')
 
             if not self.rerank_enabled:
                 logger.info("FeedbackService: Rerank 未启用")
                 return
 
-            # 获取 Rerank API 配置，如果为空则复用 OpenAI 配置
-            rerank_api_key = os.getenv("RERANK_API_KEY", "").strip()
-            rerank_api_base = os.getenv("RERANK_API_URL", "").strip()
-
-            # 如果 Rerank 配置为空，复用 OpenAI 配置
+            # 如果 Rerank API Key 为空，尝试从环境变量获取
             if not rerank_api_key:
-                rerank_api_key = os.getenv("OPENAI_API_KEY")
-                logger.info("FeedbackService: Rerank API Key 未配置，复用 OPENAI_API_KEY")
+                rerank_api_key = os.getenv("RERANK_API_KEY", "").strip()
 
+            # 如果 Rerank API Base 为空，尝试从环境变量获取
             if not rerank_api_base:
-                # 如果 Rerank API URL 未配置，复用 OPENAI_API_BASE
-                rerank_api_base = os.getenv("OPENAI_API_BASE")
-                logger.info("FeedbackService: Rerank API URL 未配置，复用 OPENAI_API_BASE")
+                rerank_api_base = os.getenv("RERANK_API_BASE", "https://siliconflow.cn/v1").strip()
+
+            # 保存 rerank_api_base 供后续使用
+            self.rerank_api_base = rerank_api_base
 
             # 初始化客户端
             if rerank_api_key:
@@ -98,7 +117,7 @@ class FeedbackService:
                 else:
                     self.openai_client = OpenAI(api_key=rerank_api_key)
                 logger.info(
-                    f"FeedbackService: Rerank 客户端初始化成功 (model={self.rerank_model})"
+                    f"FeedbackService: Rerank 客户端初始化成功 (model={self.rerank_model}, base_url={rerank_api_base})"
                 )
             else:
                 logger.warning("FeedbackService: Rerank 已启用但 API Key 未配置")
@@ -114,6 +133,64 @@ class FeedbackService:
     def _get_feedback_key(self, question_id: str, user_id: str = "default") -> str:
         """生成反馈数据的 Redis key"""
         return f"feedback:{user_id}:{question_id}"
+
+    def should_auto_hide(self, mastery_level: int, importance_score: float) -> dict:
+        """
+        根据掌握程度和重要性判断是否应该自动软删除
+        
+        规则:
+        - level = int(importance_score / 0.2)  # 0.2 = 1/5，将0-1映射到0-5
+        - mastery_level >= level: 弹窗询问（让用户决定是否隐藏）
+        - mastery_level < level: 继续规划出现时间
+        
+        参数:
+            mastery_level: 掌握程度 (0-5)
+            importance_score: 题目重要性 (0-1)，从题目数据中获取
+            
+        返回:
+            {
+                'should_hide': bool,  # 是否应该隐藏
+                'need_confirm': bool  # 是否需要用户确认
+            }
+        """
+        # 计算对应的级别阈值
+        level_threshold = int(importance_score / 0.2) if importance_score >= 0.2 else 0
+        
+        if mastery_level >= level_threshold and mastery_level > 0:
+            # 达到或超过阈值时弹窗询问（但至少要有1级掌握）
+            return {'should_hide': True, 'need_confirm': True}
+        else:
+            # 低于阈值时不处理
+            return {'should_hide': False, 'need_confirm': False}
+
+    def calculate_next_appearance_days(self, mastery_level: int, importance_score: float) -> int:
+        """
+        计算下次出现的间隔天数
+        
+        基于重要性和掌握程度的动态算法:
+        - 重要性越高，出现频率越高（间隔越短）
+        - 掌握程度越高，出现频率越低（间隔越长）
+        
+        公式: days = max(1, int((1 - importance_score) * 30 + mastery_level * 7))
+        
+        参数:
+            mastery_level: 掌握程度 (0-5)
+            importance_score: 重要性 (0-1)
+            
+        返回:
+            间隔天数 (至少1天)
+        """
+        # 基础间隔：重要性越低，间隔越长
+        base_days = (1 - importance_score) * 30
+        
+        # 掌握程度调整：掌握越好，间隔越长
+        mastery_adjustment = mastery_level * 7
+        
+        # 总间隔
+        total_days = int(base_days + mastery_adjustment)
+        
+        # 至少1天，最多90天
+        return max(1, min(90, total_days))
 
     def submit_feedback(self, question_id: str, feedback_data: Dict[str, Any]) -> bool:
         """
@@ -149,14 +226,6 @@ class FeedbackService:
                     new_mastery = feedback_data['mastery_level']
                     logger.info(f"评分变化: question_id={question_id}, old={old_mastery}, new={new_mastery}")
                     feedback.mastery_level = new_mastery
-                    
-                    # 如果达到满级（5级），询问是否从推荐中隐藏
-                    if new_mastery == 5 and old_mastery < 5:
-                        # 用户可以选择不再在推荐中出现
-                        if feedback_data.get('hide_from_recommendation', False):
-                            feedback.hide_from_recommendation = True
-                            feedback.hidden_at = now
-                            logger.info(f"题目已隐藏: question_id={question_id}")
 
                 if 'is_favorite' in feedback_data:
                     feedback.is_favorite = feedback_data['is_favorite']
@@ -383,9 +452,8 @@ class FeedbackService:
             # 调用 Rerank API - 使用标准的 /v1/rerank endpoint
             import requests
 
-            # 获取 base_url 并构造 rerank endpoint
-            base_url = str(self.openai_client.base_url).rstrip('/')
-            rerank_url = f"{base_url}/rerank"
+            # 使用独立的 Rerank API base URL（不与 OpenAI 耦合）
+            rerank_url = f"{self.rerank_api_base.rstrip('/')}/rerank"
 
             headers = {
                 "Authorization": f"Bearer {self.openai_client.api_key}",
@@ -704,4 +772,51 @@ class FeedbackService:
         
         return False
 
+    def get_hidden_questions(self, user_id: str = "default") -> List[str]:
+        """
+        获取已隐藏（软删除）的题目ID列表
+        
+        参数:
+            user_id: 用户ID
+            
+        返回:
+            隐藏的题目ID列表
+        """
+        if not self.redis_client:
+            return []
+        
+        try:
+            pattern = f"feedback:{user_id}:*"
+            keys = self.redis_client.keys(pattern)
+            hidden_ids = []
+            now = datetime.now()
+            
+            for key in keys:
+                data = self.redis_client.hgetall(key)
+                hide_flag = data.get(b'hide_from_recommendation', b'False').decode() == 'True'
+                hidden_at_str = data.get(b'hidden_at', b'').decode()
+                
+                if not hide_flag or not hidden_at_str:
+                    continue
+                
+                try:
+                    hidden_at = datetime.fromisoformat(hidden_at_str)
+                    days_hidden = (now - hidden_at).days
+                    
+                    # 只返回30天内的隐藏题目
+                    if days_hidden < 30:
+                        question_id = data.get(b'question_id', b'').decode()
+                        if question_id:
+                            hidden_ids.append(question_id)
+                except ValueError:
+                    continue
+            
+            return hidden_ids
+            
+        except Exception as e:
+            logger.error(f"获取隐藏题目失败: {str(e)}")
+            return []
+
 # Trigger reload
+
+

@@ -7,13 +7,23 @@
 """
 import redis
 import os
-from dotenv import load_dotenv
+import yaml
+from pathlib import Path
 
-# 加载环境变量
-load_dotenv()
+def get_redis_url() -> str:
+    """从 config.yaml 读取 Redis 配置并构建 URL"""
+    try:
+        # 使用统一的配置管理器
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from app.config.config_manager import config_manager
+        return config_manager.get_redis_url()
+    except Exception as e:
+        print(f"加载配置失败: {e}，使用默认值")
+        return "redis://localhost:6379"
 
 # 连接 Redis
-redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+redis_url = get_redis_url()
 redis_client = redis.from_url(redis_url)
 
 print(f"连接到 Redis: {redis_url}")

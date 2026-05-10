@@ -6,15 +6,14 @@ Sitemap 爬虫 CLI 入口点
 使用方法:
     python -m app.main_crawler                           # 使用默认配置文件
     python -m app.main_crawler --sitemap-url https://example.com/sitemap.xml
-    python -m app.main_crawler --config app/config/crawler_config.json
+    python -m app.main_crawler --config app/config/crawler_config.yaml
 """
 
 import argparse
 import logging
 import sys
-from pathlib import Path
 
-from app.config.crawler_config import CrawlerConfig, get_config_from_env
+from app.config.crawler_config import load_crawler_config
 from app.services.sitemap_crawler import SitemapCrawler
 
 
@@ -38,7 +37,7 @@ def parse_args() -> argparse.Namespace:
   %(prog)s                                              # 使用默认配置文件
   %(prog)s --sitemap-url https://example.com/sitemap.xml
   %(prog)s --sitemap-url https://example.com/sitemap.xml --max-urls 100
-  %(prog)s --config crawler_config.json
+  %(prog)s --config crawler_config.yaml
   %(prog)s --sitemap-url https://example.com/sitemap.xml --output-dir ./results
         """,
     )
@@ -65,7 +64,7 @@ def parse_args() -> argparse.Namespace:
         "--config",
         "-c",
         type=str,
-        help="JSON 配置文件路径",
+        help="配置文件路径（YAML 或 JSON）",
     )
 
     # 爬取设置
@@ -139,20 +138,8 @@ def main() -> int:
     setup_logging(verbose=args.verbose)
     logger = logging.getLogger(__name__)
 
-    # Load configuration
-    DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "crawler_config.json"
-
-    if args.config:
-        config_path = Path(args.config)
-        if not config_path.exists():
-            logger.error(f"配置文件未找到: {config_path}")
-            return 1
-        config = CrawlerConfig.from_json(str(config_path))
-    elif DEFAULT_CONFIG_PATH.exists():
-        logger.info(f"使用默认配置文件: {DEFAULT_CONFIG_PATH}")
-        config = CrawlerConfig.from_json(str(DEFAULT_CONFIG_PATH))
-    else:
-        config = get_config_from_env()
+    # Load configuration (优先 YAML，兼容 JSON)
+    config = load_crawler_config(args.config if args.config else None)
 
     # Override config with command line arguments
     if args.sitemap_url:

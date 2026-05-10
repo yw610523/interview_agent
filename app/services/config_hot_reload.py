@@ -8,7 +8,8 @@ import logging
 import os
 from typing import Dict, Optional
 
-from dotenv import load_dotenv, find_dotenv
+import yaml
+from pathlib import Path
 
 from app.services.llm_service import LLMService
 from app.services.vector_service import VectorService
@@ -42,11 +43,9 @@ class ConfigHotReloadManager:
         try:
             logger.info("开始热加载模型配置...")
 
-            # 重新加载环境变量
-            dotenv_path = find_dotenv()
-            if dotenv_path:
-                load_dotenv(dotenv_path, override=True)
-                logger.info(f"已重新加载环境变量文件: {dotenv_path}")
+            # 从 config.yaml 重新加载配置
+            from app.config.config_manager import config_manager
+            config_manager.reload()
 
             # 重新初始化LLM服务
             if self.llm_service:
@@ -54,9 +53,11 @@ class ConfigHotReloadManager:
                 logger.info("✅ LLM服务配置已更新")
 
                 # 验证配置
-                api_key = os.getenv("OPENAI_API_KEY", "")
-                api_base = os.getenv("OPENAI_API_BASE", "")
-                model = os.getenv("OPENAI_MODEL", "")
+                llm_config = config_manager.get_config('llm')
+                openai_config = llm_config.get('openai', {})
+                api_key = openai_config.get('api_key', '')
+                api_base = openai_config.get('api_base', '')
+                model = openai_config.get('model', '')
 
                 logger.info("当前配置:")
                 logger.info(f"  - API Base: {api_base or '默认'}")
@@ -75,28 +76,27 @@ class ConfigHotReloadManager:
     def reload_redis_config(self) -> bool:
         """
         热加载Redis配置
-
+    
         Returns:
             bool: 是否成功重新加载
         """
         try:
             logger.info("开始热加载Redis配置...")
-
-            # 重新加载环境变量
-            dotenv_path = find_dotenv()
-            if dotenv_path:
-                load_dotenv(dotenv_path, override=True)
-                logger.info(f"已重新加载环境变量文件: {dotenv_path}")
-
+    
+            # 从 config.yaml 重新加载配置
+            from app.config.config_manager import config_manager
+            config_manager.reload()
+    
             # 重新初始化向量服务
             if self.vector_service:
                 self.vector_service._init_clients()
                 logger.info("✅ Redis/向量服务配置已更新")
-
+    
                 # 验证配置
-                redis_url = os.getenv("REDIS_URL", "")
+                redis_config = config_manager.get_config('redis')
+                redis_url = config_manager.get_redis_url()
                 logger.info(f"当前Redis URL: {redis_url}")
-
+    
                 # 检查连接状态
                 if self.vector_service.redis_client:
                     try:
@@ -112,7 +112,7 @@ class ConfigHotReloadManager:
             else:
                 logger.warning("向量服务实例未设置，无法热加载")
                 return False
-
+    
         except Exception as e:
             logger.error(f"热加载Redis配置失败: {str(e)}")
             return False
@@ -127,16 +127,15 @@ class ConfigHotReloadManager:
         try:
             logger.info("开始热加载邮件配置...")
 
-            # 重新加载环境变量
-            dotenv_path = find_dotenv()
-            if dotenv_path:
-                load_dotenv(dotenv_path, override=True)
-                logger.info(f"已重新加载环境变量文件: {dotenv_path}")
+            # 从 config.yaml 重新加载配置
+            from app.config.config_manager import config_manager
+            config_manager.reload()
 
             # 验证配置
-            smtp_server = os.getenv("SMTP_SERVER", "")
-            smtp_port = os.getenv("SMTP_PORT", "")
-            smtp_user = os.getenv("SMTP_USER", "")
+            smtp_config = config_manager.get_config('smtp')
+            smtp_server = smtp_config.get('server', '')
+            smtp_port = smtp_config.get('port', '')
+            smtp_user = smtp_config.get('user', '')
 
             logger.info("当前邮件配置:")
             logger.info(f"  - SMTP服务器: {smtp_server or '未配置'}")
@@ -152,6 +151,40 @@ class ConfigHotReloadManager:
 
         except Exception as e:
             logger.error(f"热加载邮件配置失败: {str(e)}")
+            return False
+
+    def reload_crawler_config(self) -> bool:
+        """
+        热加载爬虫配置
+
+        Returns:
+            bool: 是否成功重新加载
+        """
+        try:
+            logger.info("开始热加载爬虫配置...")
+
+            # 从 config.yaml 重新加载配置
+            from app.config.config_manager import config_manager
+            config_manager.reload()
+
+            # 验证配置
+            crawler_config = config_manager.get_config('crawler')
+            sitemap_url = crawler_config.get('sitemap_url', '')
+            timeout = crawler_config.get('timeout', '')
+
+            logger.info("当前爬虫配置:")
+            logger.info(f"  - Sitemap URL: {sitemap_url or '未配置'}")
+            logger.info(f"  - 超时时间: {timeout or '默认'}")
+
+            if sitemap_url:
+                logger.info("✅ 爬虫配置已更新")
+                return True
+            else:
+                logger.warning("⚠️ 爬虫配置不完整")
+                return False
+
+        except Exception as e:
+            logger.error(f"热加载爬虫配置失败: {str(e)}")
             return False
 
     def reload_scheduler_config(self, scheduler, new_hour: int, new_minute: int) -> bool:
@@ -187,13 +220,25 @@ class ConfigHotReloadManager:
 
             logger.info(f"✅ 定时任务已更新为每天 {new_hour}:{new_minute:02d} 执行")
 
-            # 更新环境变量（供下次启动使用）
-            dotenv_path = find_dotenv()
-            if dotenv_path:
-                from dotenv import set_key
-                set_key(dotenv_path, 'SCHEDULER_HOUR', str(new_hour))
-                set_key(dotenv_path, 'SCHEDULER_MINUTE', str(new_minute))
-                logger.info("已保存定时配置到.env文件")
+            # 更新配置文件（供下次启动使用）
+            config_path = Path(__file__).parent.parent.parent / "config.yaml"
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = yaml.safe_load(f)
+                
+                # 确保 crawler.scheduler 存在
+                if 'crawler' not in config:
+                    config['crawler'] = {}
+                if 'scheduler' not in config['crawler']:
+                    config['crawler']['scheduler'] = {}
+                
+                config['crawler']['scheduler']['hour'] = new_hour
+                config['crawler']['scheduler']['minute'] = new_minute
+                
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+                
+                logger.info("已保存定时配置到config.yaml文件")
 
             return True
 

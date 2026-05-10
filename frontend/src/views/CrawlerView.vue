@@ -101,21 +101,23 @@
       <a-tab-pane key="single" tab="单页爬取">
         <a-row :gutter="[24, 24]">
           <a-col :span="24">
-            <a-card title="🔍 智能爬取单个页面" :bordered="false">
-              <a-form layout="inline">
-                <a-form-item label="页面URL" style="width: 100%;">
-                  <a-input
-                    v-model:value="singlePageUrl"
-                    placeholder="输入要爬取的页面URL"
-                    style="width: 100%; max-width: 600px;"
-                  />
-                </a-form-item>
-                <a-form-item>
-                  <a-button type="primary" @click="crawlSinglePage" :loading="singlePageLoading">
-                    开始爬取
-                  </a-button>
-                </a-form-item>
-              </a-form>
+            <a-card title="智能爬取单个页面" :bordered="false">
+              <div class="single-crawl-input">
+                <a-input
+                  v-model:value="singlePageUrl"
+                  placeholder="输入要爬取的页面URL"
+                  size="large"
+                  allow-clear
+                  @keyup.enter="crawlSinglePage"
+                  class="single-page-url-input"
+                >
+                  <template #suffix>
+                    <a-button type="primary" @click="crawlSinglePage" :loading="singlePageLoading">
+                      确定
+                    </a-button>
+                  </template>
+                </a-input>
+              </div>
 
               <a-divider />
 
@@ -501,6 +503,14 @@ onUnmounted(() => {
   margin: 0 auto;
   padding: 16px;
   min-height: calc(100vh - 112px); /* 减去 header 和 footer 高度 */
+}
+
+.single-crawl-input {
+  max-width: 800px;
+}
+
+.single-page-url-input {
+  width: 100%;
 }
 
 @media (max-width: 768px) {

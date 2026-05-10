@@ -57,4 +57,4 @@ crawl_results/
 *.json
 
 # Environment
-.env
+config.yaml  # 通过卷映射，不打包进镜像

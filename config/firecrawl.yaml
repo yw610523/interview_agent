@@ -1,0 +1,28 @@
+# ============================================================
+# Firecrawl 配置
+# ============================================================
+# Firecrawl 是用于爬取 JavaScript 渲染页面的服务
+# 支持自托管和官方云服务两种模式
+# ============================================================
+
+# 是否启用 Firecrawl 功能
+# true: 使用 Firecrawl 爬取动态页面
+# false: 使用传统 HTTP 请求爬取静态页面
+enabled: false
+
+# Firecrawl API 地址：
+# - 自托管：http://localhost:3002 或 http://host.docker.internal:3002
+# - 官方云：https://api.firecrawl.dev
+api_url: http://persist.firecrawl.com:3002
+
+# API 密钥：认证令牌（自托管可留空，官方云必须提供）
+api_key: fc-persist-key
+
+# 请求超时时间（秒）：单个页面爬取的最大等待时间
+timeout: 500
+
+# 是否使用官方 Firecrawl 云服务（vs 自托管）
+use_official: false
+
+# 是否只提取主要内容（去除导航、广告等无关内容）
+only_main_content: true

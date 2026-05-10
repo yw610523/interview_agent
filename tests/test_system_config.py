@@ -71,29 +71,11 @@ def test_update_llm_config():
 
 
 def test_update_redis_config():
-    """测试更新Redis配置"""
+    """测试更新Redis配置（已废弃，Redis配置现在使用 host/port/password）"""
     print("=" * 60)
-    print("测试3: 更新Redis配置")
+    print("测试3: 更新Redis配置 (已废弃)")
     print("=" * 60)
-
-    try:
-        response = requests.put(
-            f"{BASE_URL}/redis-config",
-            json={"redis_url": "redis://localhost:6379"},
-            headers={"Content-Type": "application/json"}
-        )
-        print(f"状态码: {response.status_code}")
-
-        if response.status_code == 200:
-            data = response.json()
-            print(f"响应状态: {data['status']}")
-            print(f"消息: {data['message']}")
-            print("\n✅ 测试通过")
-        else:
-            print(f"❌ 测试失败: {response.text}")
-    except Exception as e:
-        print(f"❌ 测试失败: {str(e)}")
-
+    print("⚠️  此测试已废弃，Redis配置现在使用 host/port/password 字段")
     print()
 
 

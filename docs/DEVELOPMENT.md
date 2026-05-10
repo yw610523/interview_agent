@@ -188,10 +188,10 @@ Redis Stack 通过 `FT.CREATE` 创建向量索引支持 `KNN` 搜索。
 
 ## 配置管理
 
-系统支持三种配置来源，**优先级从高到低**：
+系统支持两种配置来源，**优先级从高到低**：
 
 ```
-CLI 参数  >  JSON 配置文件  >  环境变量 (.env)
+CLI 参数  >  YAML 配置文件 (config.yaml)
 ```
 
 ### CrawlerConfig 类
@@ -199,27 +199,31 @@ CLI 参数  >  JSON 配置文件  >  环境变量 (.env)
 `app/config/crawler_config.py` 中的 `CrawlerConfig` 类统一管理所有爬虫配置：
 
 ```python
-# 从 JSON 文件加载
-config = CrawlerConfig.from_json("app/config/crawler_config.json")
+# 从 YAML 文件加载（推荐）
+config = CrawlerConfig.from_yaml("config.yaml")
 
-# 从环境变量加载
-config = get_config_from_env()
+# 从统一配置管理器加载
+from app.config.config_manager import config_manager
+config = config_manager.get_crawler_config()
 
 # 从字典加载（用于 API 更新）
 config = CrawlerConfig.from_dict({"sitemap_url": "example.com", ...})
 ```
 
-### 环境变量与 JSON 配置项对应
+### YAML 配置项说明
 
-| 环境变量 | JSON 字段 | 默认值 |
+所有配置项都在 `config.yaml` 中管理，主要包含以下部分：
+
+| 配置节 | 描述 | 示例 |
 |----------|-----------|--------|
-| `SITEMAP_URL` | `sitemap_url` | — |
-| `CRAWLER_TIMEOUT` | `timeout` | 30 |
-| `CRAWLER_MAX_URLS` | `max_urls` | null |
-| `CRAWLER_DELAY` | `delay_between_requests` | 0.5 |
-| `CRAWLER_URL_INCLUDE_PATTERNS` | `url_include_patterns` | [] |
-| `CRAWLER_URL_EXCLUDE_PATTERNS` | `url_exclude_patterns` | [] |
-| `CRAWLER_OUTPUT_DIR` | `output_dir` | ./crawl_results |
+| `crawler.sitemap_url` | Sitemap URL | `https://example.com/sitemap.xml` |
+| `crawler.timeout` | 请求超时时间 | `30` |
+| `crawler.max_urls` | 最大爬取URL数 | `null` |
+| `crawler.delay_between_requests` | 请求间隔 | `0.5` |
+| `crawler.url_include_patterns` | URL包含模式 | `["/docs/"]` |
+| `crawler.url_exclude_patterns` | URL排除模式 | `["/admin/"]` |
+| `llm.openai_api_key` | LLM API Key | `sk-xxx` |
+| `redis.url` | Redis连接地址 | `redis://localhost:6379` |
 
 ---
 
@@ -235,11 +239,12 @@ OPENAI_MODEL=new-model-name
 OPENAI_API_KEY=your_key
 ```
 
-如果新模型有特殊的 Token 限制，在 `.env` 中配置：
+如果新模型有特殊的 Token 限制，在 `config.yaml` 中配置：
 
-```ini
-MODEL_MAX_INPUT_TOKENS=128000
-MODEL_MAX_OUTPUT_TOKENS=16384
+```yaml
+llm:
+  max_input_tokens: 128000
+  max_output_tokens: 16384
 ```
 
 如果需要深度定制（如不同的请求格式），修改 `llm_service.py` 中的 `_call_llm()` 方法。

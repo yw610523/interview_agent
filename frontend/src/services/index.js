@@ -73,6 +73,16 @@ export const systemConfigApi = {
     return apiClient.put('/rerank-config', config)
   },
 
+  // 获取 Redis 配置
+  getRedisConfig() {
+    return apiClient.get('/redis-config')
+  },
+
+  // 更新 Redis 配置
+  updateRedisConfig(config) {
+    return apiClient.put('/redis-config', config)
+  },
+
   // 更新邮件配置
   updateEmailConfig(config) {
     return apiClient.put('/email-config', config)
@@ -81,6 +91,16 @@ export const systemConfigApi = {
   // 测试邮件发送
   testEmail() {
     return apiClient.post('/test-email')
+  },
+
+  // 获取内容处理配置
+  getContentConfig() {
+    return apiClient.get('/content-config')
+  },
+
+  // 更新内容处理配置
+  updateContentConfig(config) {
+    return apiClient.put('/content-config', config)
   }
 }
 
@@ -140,7 +160,7 @@ export const questionApi = {
 // 用户反馈相关 API (RESTful)
 export const feedbackApi = {
   // 提交反馈
-  submitFeedback(questionId, { masteryLevel, isFavorite, isWrongBook }) {
+  submitFeedback(questionId, { masteryLevel, isFavorite, isWrongBook, hideFromRecommendation }) {
     const params = new URLSearchParams()
     if (masteryLevel !== undefined && masteryLevel !== null) {
       params.append('mastery_level', masteryLevel)
@@ -151,12 +171,20 @@ export const feedbackApi = {
     if (isWrongBook !== undefined && isWrongBook !== null) {
       params.append('is_wrong_book', isWrongBook)
     }
+    if (hideFromRecommendation !== undefined && hideFromRecommendation !== null) {
+      params.append('hide_from_recommendation', hideFromRecommendation)
+    }
     return apiClient.post(`/questions/${questionId}/feedback?${params.toString()}`)
   },
 
   // 获取题目反馈
   getFeedback(questionId) {
     return apiClient.get(`/questions/${questionId}/feedback`)
+  },
+
+  // 更新题目重要性
+  updateImportance(questionId, importanceScore) {
+    return apiClient.put(`/questions/${questionId}/importance?importance_score=${importanceScore}`)
   },
 
   // 获取收藏列表
@@ -177,5 +205,28 @@ export const feedbackApi = {
   // 从错题本移除
   removeFromWrongBook(questionId) {
     return apiClient.delete(`/users/me/wrong-books/${questionId}`)
+  },
+
+  // 获取已掌握（软删除）的题目
+  getHiddenQuestions() {
+    return apiClient.get('/users/me/hidden-questions')
+  },
+
+  // 永久删除题目
+  permanentlyDeleteQuestion(questionId) {
+    return apiClient.delete(`/users/me/hidden-questions/${questionId}`)
+  }
+}
+
+// 提示词管理 API
+export const promptsApi = {
+  // 获取提示词配置
+  getPrompts() {
+    return apiClient.get('/prompts')
+  },
+
+  // 更新提示词配置
+  updatePrompts(prompts) {
+    return apiClient.post('/prompts', prompts)
   }
 }

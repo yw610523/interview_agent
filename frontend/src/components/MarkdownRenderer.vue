@@ -20,6 +20,7 @@ const md = new MarkdownIt({
   html: true,
   linkify: true,
   typographer: true,
+  breaks: true,  // 支持换行符转换为 <br>
   highlight: function (str, lang) {
     if (lang && hljs.getLanguage(lang)) {
       try {
@@ -35,8 +36,30 @@ const md = new MarkdownIt({
 // 渲染 Markdown 内容
 const renderedHtml = computed(() => {
   if (!props.content) return ''
-  return md.render(props.content)
+  
+  let content = props.content
+  
+  // 如果内容不包含任何 Markdown 标记，尝试智能转换
+  if (!content.includes('#') && !content.includes('**') && !content.includes('```')) {
+    // 纯文本，进行基本的格式化
+    content = autoFormatPlainText(content)
+  }
+  
+  return md.render(content)
 })
+
+// 自动格式化纯文本为基本 Markdown
+const autoFormatPlainText = (text) => {
+  // 1. 将明显的标题转换为 Markdown 标题
+  // 匹配 "一、" "二、" 或 "1." "2." 开头的行
+  text = text.replace(/^(\d+\.\s)(.+)$/gm, '## $2')
+  text = text.replace(/^([一二三四五六七八九十]+、)(.+)$/gm, '## $2')
+  
+  // 2. 确保段落之间有空行（单个换行符转换为双换行）
+  text = text.replace(/\n([^\n])/g, '\n\n$1')
+  
+  return text
+}
 </script>
 
 <style scoped>

@@ -10,10 +10,10 @@ import os
 from dataclasses import dataclass
 from typing import List, Dict, Any
 
-from dotenv import load_dotenv
+# 导入统一配置管理器
+from app.config.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
-load_dotenv()
 
 # 尝试导入不同的大模型库
 try:
@@ -65,11 +65,18 @@ class LLMService:
         - max_input_tokens: 模型支持的最大输入token数
         - max_output_tokens: 模型支持的最大输出token数
         """
-        config_max_input = os.getenv("MODEL_MAX_INPUT_TOKENS")
-        config_max_output = os.getenv("MODEL_MAX_OUTPUT_TOKENS")
+        # 优先从 config.yaml 读取，兼容环境变量
+        config_max_input = config_manager.get('llm.max_input_tokens')
+        config_max_output = config_manager.get('llm.max_output_tokens')
+        
+        # 如果 config.yaml 没有配置，尝试从环境变量读取
+        if config_max_input is None:
+            config_max_input = os.getenv("MODEL_MAX_INPUT_TOKENS")
+        if config_max_output is None:
+            config_max_output = os.getenv("MODEL_MAX_OUTPUT_TOKENS")
 
         if config_max_input and config_max_output:
-            # 从环境变量读取配置
+            # 从配置读取
             self.max_input_tokens = int(config_max_input)
             self.max_output_tokens = int(config_max_output)
             logger.info(
@@ -77,7 +84,7 @@ class LLMService:
             )
         else:
             # 使用默认值（根据常见模型）
-            model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+            model_name = config_manager.get('llm.model') or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
             model_limits = {
                 "gpt-3.5-turbo": (16384, 4096),
                 "gpt-4": (8192, 4096),
@@ -185,8 +192,9 @@ class LLMService:
         """
         初始化大模型客户端
         """
-        api_key = os.getenv("OPENAI_API_KEY")
-        api_base = os.getenv("OPENAI_API_BASE")
+        # 优先从 config.yaml 读取，兼容环境变量
+        api_key = config_manager.get('llm.openai_api_key') or os.getenv("OPENAI_API_KEY")
+        api_base = config_manager.get('llm.openai_api_base') or os.getenv("OPENAI_API_BASE")
 
         if api_key and OPENAI_AVAILABLE:
             try:
@@ -311,8 +319,14 @@ class LLMService:
 
     def _get_system_prompt(self) -> str:
         """
-        获取优化的系统提示词
+        获取优化的系统提示词（从配置文件读取）
         """
+        # 优先从 config.yaml 读取，如果没有则使用默认值
+        custom_prompt = config_manager.get('prompts.question_extraction_system')
+        if custom_prompt:
+            return custom_prompt
+        
+        # 默认提示词（向后兼容）
         return """
 你是一位资深技术面试官和技术内容专家。请仔细阅读提供的网页内容，提取高质量的技术面试问题。
 
@@ -323,10 +337,40 @@ class LLMService:
 4. **智能分类**：根据问题类型和难度进行分类
 
 ## 重要原则：
-- 如果内容是围绕一个主要技术点展开的（如"反射的应用场景"），请将其作为一个整体问题处理
+- 如果内容是围绕一个主要技术点展开的（如“反射的应用场景”），请将其作为一个整体问题处理
 - 不要将文章中的每个小知识点都拆分成独立的问题
 - 答案应该详尽，包含原文中的所有技术细节和代码示例
 - 答案长度至少300字以上，确保内容充实
+
+## ⚠️ 答案格式要求（非常重要）：
+**必须使用 Markdown 格式编写答案**，以提高可读性：
+- 使用 `## 标题` 分隔不同部分
+- 使用 **粗体** 强调关键概念
+- 使用 `代码块` 包裹代码示例（指定语言，如 ```python）
+- 使用 - 列表 或 1. 有序列表 组织要点
+- 使用 > 引用块 标注重要说明
+- 适当使用空行分隔段落
+
+示例格式：
+```markdown
+## 核心概念
+这是核心概念的详细解释...
+
+## 实现方法
+具体实现步骤如下：
+
+1. 第一步说明
+2. 第二步说明
+
+```python
+# 代码示例
+def example():
+    pass
+```
+
+## 注意事项
+> 这里是需要特别注意的地方
+```
 
 ## 问题类型：
 - **概念定义**：技术术语的定义、核心概念解释
@@ -348,7 +392,7 @@ class LLMService:
 [
   {
     "title": "问题标题，必须是一个完整的疑问句",
-    "answer": "基于原文的详细技术答案（至少300字，包含所有技术细节和代码示例）",
+    "answer": "基于原文的详细技术答案（至少300字，使用Markdown格式，包含所有技术细节和代码示例）",
     "source_url": "来源网页URL",
     "tags": ["相关技术标签", "如Python", "算法"],
     "importance_score": 0.8,
@@ -360,12 +404,19 @@ class LLMService:
 ## 注意事项：
 1. 只从网页内容中提取问题，不要凭空捏造
 2. 问题标题必须是清晰的疑问句
-3. 答案必须基于原文内容，保持准确和完整
+3. **答案必须使用 Markdown 格式**，提高可读性
 4. 如果内容是单一主题，返回1个详细问题；如果有多个独立主题，可返回2-3个问题
 5. 确保输出是有效的JSON格式
 """
 
-    def _split_content_by_semantics(self, content: str, max_length: int = 1500, overlap: int = 300) -> list:
+    def _split_content_by_semantics(
+        self,
+        content: str,
+        max_length: int = 1500,
+        overlap: int = 300,
+        separators: list = None,
+        min_chunk_length: int = 100
+    ) -> list:
         """
         使用滑动窗口和语义边界分割内容
 
@@ -373,10 +424,15 @@ class LLMService:
             content: 要分割的内容
             max_length: 每个chunk的最大长度
             overlap: 相邻chunk之间的重叠长度
+            separators: 分隔符优先级列表
+            min_chunk_length: 最小chunk长度
 
         返回:
             分割后的内容chunk列表
         """
+        if separators is None:
+            separators = ['\n\n', '\n', '。', '！', '？', '.', '!', '?', ' ']
+        
         chunks = []
         content_length = len(content)
 
@@ -388,17 +444,28 @@ class LLMService:
             end = min(start + max_length, content_length)
 
             # 在语义边界处分割（优先找段落、句子结束位置）
-            # 从end位置向前查找合适的分割点
             split_pos = end
 
-            # 优先在段落分隔处分割
-            for sep in ['\n\n', '\n', '。', '！', '？', '.', '!', '?']:
-                pos = content.rfind(sep, start + max_length // 2, end)
+            # 按优先级尝试分隔符
+            for sep in separators:
+                # 在重叠区域之后开始查找分隔符
+                search_start = start + max_length // 2
+                if search_start >= end:
+                    search_start = start + (max_length - overlap)
+                
+                pos = content.rfind(sep, search_start, end)
                 if pos != -1:
                     split_pos = pos + len(sep)
                     break
 
             chunk = content[start:split_pos]
+            
+            # 跳过过小的 chunk（合并到前一个）
+            if len(chunk.strip()) < min_chunk_length and chunks:
+                chunks[-1] = chunks[-1] + chunk
+                start = split_pos
+                continue
+            
             chunks.append(chunk.strip())
 
             # 计算下一个起始位置（考虑重叠）
@@ -418,6 +485,68 @@ class LLMService:
                 logger.warning(f"chunk数量过多({len(chunks)})，停止分割")
                 break
 
+        return chunks
+
+    def _split_content_by_markdown(self, content: str, max_length: int) -> list:
+        """
+        按 Markdown 标题层级分割内容
+
+        参数:
+            content: Markdown 格式内容
+            max_length: 最大chunk长度
+
+        返回:
+            分割后的内容chunk列表
+        """
+        import re
+        chunks = []
+        
+        # 匹配标题行（# 到 ######）
+        heading_pattern = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
+        headings = list(heading_pattern.finditer(content))
+        
+        if not headings:
+            # 没有标题，降级为语义切分
+            return self._split_content_by_semantics(content, max_length)
+        
+        # 按标题分割
+        for i, heading in enumerate(headings):
+            start_pos = heading.start()
+            end_pos = headings[i + 1].start() if i + 1 < len(headings) else len(content)
+            
+            chunk = content[start_pos:end_pos].strip()
+            
+            # 如果 chunk 太长，再次分割
+            if len(chunk) > max_length * 2:
+                sub_chunks = self._split_content_by_semantics(chunk, max_length)
+                chunks.extend(sub_chunks)
+            else:
+                chunks.append(chunk)
+        
+        return chunks
+
+    def _split_content_fixed(self, content: str, max_length: int, overlap: int) -> list:
+        """
+        固定长度切分（不考虑语义）
+
+        参数:
+            content: 原始内容
+            max_length: 块大小
+            overlap: 重叠长度
+
+        返回:
+            分割后的内容chunk列表
+        """
+        chunks = []
+        content_length = len(content)
+        
+        start = 0
+        while start < content_length:
+            end = min(start + max_length, content_length)
+            chunk = content[start:end]
+            chunks.append(chunk)
+            start = end - overlap  # 重叠
+        
         return chunks
 
     def _build_prompt(self, crawl_results: List[Dict[str, Any]]) -> str:
@@ -452,14 +581,43 @@ class LLMService:
         """
         all_questions = []
 
-        # 如果内容过长，进行chunk分割
-        # 从环境变量读取单页最大内容长度，默认2000字符
-        max_content_length = int(os.getenv("MAX_CONTENT_LENGTH_PER_PAGE", 2000))
-        if len(content) <= max_content_length:
+        # 从 content 配置读取切分参数
+        from app.config.content_config import get_content_config
+        content_config = get_content_config()
+        
+        chunk_size = content_config.chunk_size
+        chunk_overlap = content_config.chunk_overlap
+        separators = content_config.separators
+        chunking_mode = content_config.chunking_mode
+        max_chunks = content_config.max_chunks_per_page
+        min_chunk_length = content_config.min_chunk_length
+        
+        # 判断是否需要分块：如果内容长度小于 chunk_size 的2倍，不分块
+        if len(content) <= chunk_size * 2:
             chunks = [content]
+            logger.info(f"页面 {url} 内容长度({len(content)}字符)较短，无需分块")
         else:
-            chunks = self._split_content_by_semantics(content, max_length=max_content_length, overlap=200)
-            logger.info(f"页面 {url} 内容过长({len(content)}字符)，分割为 {len(chunks)} 个chunk")
+            # 根据切分模式选择不同的策略
+            if chunking_mode == "markdown":
+                chunks = self._split_content_by_markdown(content, max_length=chunk_size)
+            elif chunking_mode == "fixed":
+                chunks = self._split_content_fixed(content, max_length=chunk_size, overlap=chunk_overlap)
+            else:  # semantic (默认)
+                chunks = self._split_content_by_semantics(
+                    content, 
+                    max_length=chunk_size, 
+                    overlap=chunk_overlap,
+                    separators=separators,
+                    min_chunk_length=min_chunk_length
+                )
+            
+            # 限制最大 chunk 数量
+            if len(chunks) > max_chunks:
+                logger.warning(f"页面 {url} chunk 数量({len(chunks)})超过限制({max_chunks})，将被截断")
+                chunks = chunks[:max_chunks]
+            
+            logger.info(f"页面 {url} 内容过长({len(content)}字符)，使用 {chunking_mode} 模式分割为 {len(chunks)} 个chunk")
+            logger.info(f"切分参数: chunk_size={chunk_size}, chunk_overlap={chunk_overlap}, separators={len(separators)}个")
             logger.info(f"各chunk长度: {[len(c) for c in chunks]}")
 
         if self.client is None:
@@ -492,7 +650,7 @@ URL: {url}
                         break
 
                     # 记录调用参数
-                    model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+                    model_name = config_manager.get('llm.model') or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
                     system_prompt = self._get_system_prompt()
                     logger.info(
                         f"调用大模型参数: model={model_name}, "
@@ -515,8 +673,12 @@ URL: {url}
 
                     result = response.choices[0].message.content or ""
                     logger.info(f"LLM返回内容长度: {len(result)} 字符")
+                    
+                    # 打印返回内容的前500字符用于调试
+                    logger.info(f"LLM返回内容前500字符:\n{result[:500]}")
 
                     questions = self._parse_response(result)
+                    logger.info(f"_parse_response 解析结果: {len(questions)} 个问题")
 
                     # 检查是否成功解析到问题
                     if questions:
@@ -605,9 +767,13 @@ URL: {url}
 
                 questions = []
                 for item in data:
+                    # 兼容多种字段名：question 或 title
+                    title = item.get("title") or item.get("question", "")
+                    answer = item.get("answer", "")
+                    
                     question = ParsedQuestion(
-                        title=item.get("title", ""),
-                        answer=item.get("answer", ""),
+                        title=title,
+                        answer=answer,
                         source_url=item.get("source_url", ""),
                         tags=item.get("tags", []),
                         importance_score=item.get("importance_score", 0.0),
@@ -616,6 +782,8 @@ URL: {url}
                     )
                     if question.title and question.answer:
                         questions.append(question)
+                    else:
+                        logger.warning(f"跳过无效问题: title='{title[:50] if title else ''}', answer_length={len(answer)}")
 
                 return questions
             else:
@@ -856,8 +1024,9 @@ URL: {url}
             return "大模型服务未配置"
 
         try:
+            model_name = config_manager.get('llm.model') or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
             response = self.client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+                model=model_name,
                 messages=[
                     {
                         "role": "system",
@@ -886,8 +1055,9 @@ URL: {url}
 
         for attempt in range(max_retries):
             try:
+                model_name = config_manager.get('llm.model') or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
                 response = self.client.chat.completions.create(
-                    model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+                    model=model_name,
                     messages=[
                         {"role": "system", "content": self._get_system_prompt()},
                         {"role": "user", "content": prompt},

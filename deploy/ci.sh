@@ -27,8 +27,8 @@ log_error() {
 # 获取脚本所在目录和项目根目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-ENV_FILE="${PROJECT_DIR}/.env"
-ENV_TEMPLATE="${PROJECT_DIR}/.env.template"
+CONFIG_FILE="${PROJECT_DIR}/config.yaml"
+CONFIG_TEMPLATE="${PROJECT_DIR}/config.yaml.template"
 
 # 确定使用的 docker-compose 文件（可通过 COMPOSE_FILE 环境变量指定）
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
@@ -38,140 +38,92 @@ log_info "========================================="
 log_info "开始部署 Interview Agent"
 log_info "========================================="
 
-# 步骤 1: 检查 .env 文件是否存在
-log_info "步骤 1: 检查 .env 配置文件..."
+# 步骤 1: 检查配置文件
+log_info "步骤 1: 检查配置文件..."
 
-if [ ! -f "$ENV_FILE" ]; then
-    log_warn ".env 文件不存在，从 .env.template 复制..."
+# 检查 config.yaml
+if [ ! -f "$CONFIG_FILE" ]; then
+    log_warn "config.yaml 文件不存在"
     
-    if [ ! -f "$ENV_TEMPLATE" ]; then
-        log_error ".env.template 模板文件也不存在！"
+    if [ -f "$CONFIG_TEMPLATE" ]; then
+        log_info "从 config.yaml.template 复制创建 config.yaml..."
+        cp "$CONFIG_TEMPLATE" "$CONFIG_FILE"
+        log_info "✅ 已创建 config.yaml 文件"
+        log_warn "⚠️  请编辑 $CONFIG_FILE 并填写必要的配置项（如 API Keys）"
+        
+        # 提示用户编辑配置文件
+        log_warn ""
+        log_warn "重要提示："
+        log_warn "  1. 编辑 config.yaml 文件"
+        log_warn "  2. 至少配置以下关键项："
+        log_warn "     - llm.openai_api_key (OpenAI API 密钥)"
+        log_warn "     - redis.url (Redis 连接地址)"
+        log_warn "     - smtp.user 和 smtp.password (邮件配置，如需使用)"
+        log_warn "  3. 保存后重新运行部署脚本"
+        log_warn ""
+        
+        # 不再自动退出，允许继续部署（用户可以稍后编辑）
+        log_warn "⚠️  如果现在不编辑，应用可能无法正常运行"
+    else
+        log_error "config.yaml.template 模板文件也不存在！"
         exit 1
     fi
-    
-    cp "$ENV_TEMPLATE" "$ENV_FILE"
-    log_info "已创建 .env 文件，请编辑该文件并填写必要的配置项"
-    
-    # 检查必要的环境变量
-    MISSING_VARS=()
-    
-    # 读取 .env 文件，检查必填项
-    while IFS='=' read -r key value; do
-        # 跳过注释和空行
-        [[ "$key" =~ ^#.*$ ]] && continue
-        [[ -z "$key" ]] && continue
-        
-        # 去除空格
-        key=$(echo "$key" | xargs)
-        value=$(echo "$value" | xargs)
-        
-        # 检查必填项（根据你的实际需求调整）
-        case "$key" in
-            "OPENAI_API_KEY")
-                if [ -z "$value" ]; then
-                    MISSING_VARS+=("$key")
-                fi
-                ;;
-        esac
-    done < "$ENV_FILE"
-    
-    if [ ${#MISSING_VARS[@]} -gt 0 ]; then
-        log_error "以下必需的环境变量未配置："
-        for var in "${MISSING_VARS[@]}"; do
-            log_error "  - $var"
-        done
-        log_error ""
-        log_error "请编辑 .env 文件并填写上述变量："
-        log_error "  vim $ENV_FILE"
-        log_error ""
-        log_error "然后重新运行部署脚本或手动执行："
-        log_error "  cd $SCRIPT_DIR && docker compose up -d"
-        exit 1
-    fi
-    
-    log_info "✅ .env 文件已创建，所有必需变量已配置"
 else
-    log_info "✅ .env 文件已存在"
+    log_info "✅ config.yaml 文件已存在"
 fi
 
-# 步骤 2: 初始化并更新 Firecrawl Submodule
-log_info "步骤 2: 初始化 Firecrawl Submodule..."
+# 步骤 2: 启动 Firecrawl 服务（使用 Docker Compose）
+log_info "步骤 2: 检查并启动 Firecrawl..."
 
-# 检查 submodule 是否存在
-if [ ! -d "${PROJECT_DIR}/submodules/firecrawl" ]; then
-    log_info "Submodule 不存在，正在克隆..."
-    cd "$PROJECT_DIR"
-    git submodule add https://github.com/yw610523/firecrawl.git submodules/firecrawl
-fi
+# Firecrawl 配置文件路径
+FIRECRAWL_COMPOSE="${SCRIPT_DIR}/docker-compose-firecrawl.yaml"
+FIRECRAWL_ENV_FILE="${PROJECT_DIR}/.env.firecrawl"
 
-# 更新 submodule (拉取最新代码)
-log_info "更新 Firecrawl 源码..."
-cd "$PROJECT_DIR"
-git submodule update --init --recursive
-
-# 进入 submodule 拉取最新代码
-cd "${PROJECT_DIR}/submodules/firecrawl"
-log_info "拉取 Firecrawl 最新代码..."
-git pull origin main || log_warn "⚠️  拉取失败，使用当前版本"
-
-# 返回项目目录
-cd "$SCRIPT_DIR"
-log_info "✅ Firecrawl Submodule 准备完成"
-
-# 步骤 3: 构建并启动 Firecrawl(使用 firecrawl-manage.sh)
-log_info "步骤 3: 检查并启动 Firecrawl..."
-
-# 检查 manage 脚本是否存在
-MANAGE_SCRIPT="${SCRIPT_DIR}/firecrawl-manage.sh"
-if [ ! -f "$MANAGE_SCRIPT" ]; then
-    log_error "firecrawl-manage.sh 不存在!"
+if [ ! -f "$FIRECRAWL_COMPOSE" ]; then
+    log_error "docker-compose-firecrawl.yaml 不存在!"
     exit 1
 fi
 
-# 切换到项目根目录再执行 firecrawl-manage.sh（确保子模块路径正确）
-cd "$PROJECT_DIR"
+# 检查环境变量文件
+if [ ! -f "$FIRECRAWL_ENV_FILE" ]; then
+    log_warn ".env.firecrawl 文件不存在，使用默认配置"
+    log_warn "如需自定义私有仓库地址，请复制 deploy/.env.firecrawl.template 为 .env.firecrawl"
+else
+    log_info "✅ 检测到 .env.firecrawl 配置文件"
+fi
 
-# 智能检测：检查 Firecrawl 是否需要重新构建
-NEED_REBUILD=false
+# 智能检测：检查 Firecrawl 是否需要重启
+NEED_RESTART=false
 
-# 1. 检查容器是否运行
-if docker compose -f "${PROJECT_DIR}/submodules/firecrawl/docker-compose.yaml" ps api | grep -q "Up"; then
+# 检查容器是否运行
+if docker compose -f "$FIRECRAWL_COMPOSE" ps api 2>/dev/null | grep -q "Up"; then
     log_info "✅ Firecrawl 容器正在运行"
+else
+    log_warn "⚠️  Firecrawl 容器未运行，需要启动"
+    NEED_RESTART=true
+fi
+
+# 根据检测结果决定是否启动
+if [ "$NEED_RESTART" = true ]; then
+    log_info "启动 Firecrawl 服务..."
+    cd "$SCRIPT_DIR"
     
-    # 2. 检查 submodule 是否有未提交的更改
-    cd "${PROJECT_DIR}/submodules/firecrawl"
-    if git status --porcelain | grep -q .; then
-        log_warn "⚠️  Firecrawl 源码有未提交更改，需要重新构建"
-        NEED_REBUILD=true
+    # 使用 --env-file 加载环境变量
+    if [ -f "$FIRECRAWL_ENV_FILE" ]; then
+        docker compose -f "$FIRECRAWL_COMPOSE" --env-file "$FIRECRAWL_ENV_FILE" up -d
     else
-        log_info "✅ Firecrawl 源码无更改"
+        docker compose -f "$FIRECRAWL_COMPOSE" up -d
     fi
-    cd "$PROJECT_DIR"
+    
+    log_info "✅ Firecrawl 启动完成"
 else
-    log_warn "⚠️  Firecrawl 容器未运行，需要构建和启动"
-    NEED_REBUILD=true
+    log_info "⏭️  跳过 Firecrawl 启动（容器已在运行）"
 fi
-
-# 根据检测结果决定是否构建
-if [ "$NEED_REBUILD" = true ]; then
-    log_info "开始构建 Firecrawl 镜像..."
-    bash "$MANAGE_SCRIPT" build
-    log_info "✅ Firecrawl 构建完成"
-else
-    log_info "⏭️  跳过 Firecrawl 构建（容器运行中且代码无变化）"
-fi
-
-# 启动 Firecrawl 服务（如果已运行则无影响）
-log_info "确保 Firecrawl 服务运行..."
-bash "$MANAGE_SCRIPT" start
-
-# 返回 deploy 目录
-cd "$SCRIPT_DIR"
 
 log_info "✅ Firecrawl 部署完成"
 
-# 步骤 4: 拉取最新 App 镜像
-log_info "步骤 4: 拉取最新 App 镜像..."
+# 步骤 3: 拉取最新 App 镜像
+log_info "步骤 3: 拉取最新 App 镜像..."
 
 # 检查是否配置了 GHCR_TOKEN（可选，公开仓库不需要）
 if [ -n "$GHCR_TOKEN" ]; then
@@ -187,13 +139,13 @@ else
     log_warn "如果是首次部署，请确保已构建 App 镜像"
 fi
 
-# 步骤 5: 停止旧容器
-log_info "步骤 5: 停止旧容器..."
+# 步骤 4: 停止旧容器
+log_info "步骤 4: 停止旧容器..."
 docker compose -f "${SCRIPT_DIR}/$COMPOSE_FILE" down --remove-orphans || true
 log_info "✅ 旧容器已停止"
 
-# 步骤 6: 启动新容器
-log_info "步骤 6: 启动新容器..."
+# 步骤 5: 启动新容器
+log_info "步骤 5: 启动新容器..."
 docker compose -f "${SCRIPT_DIR}/$COMPOSE_FILE" up -d
 
 if [ $? -eq 0 ]; then
@@ -201,6 +153,24 @@ if [ $? -eq 0 ]; then
 else
     log_error "❌ 容器启动失败！"
     exit 1
+fi
+
+# 步骤 6: 验证 config.yaml 挂载
+log_info "步骤 6: 验证配置文件挂载..."
+sleep 3
+
+# 检查容器内是否存在 config.yaml
+if docker exec interview-agent test -f /app/config.yaml 2>/dev/null; then
+    log_info "✅ config.yaml 已成功挂载到容器"
+    
+    # 显示配置文件大小，确认内容已加载
+    CONFIG_SIZE=$(docker exec interview-agent wc -c < /app/config.yaml 2>/dev/null || echo "unknown")
+    log_info "   配置文件大小: ${CONFIG_SIZE} bytes"
+else
+    log_warn "⚠️  config.yaml 未挂载到容器"
+    log_warn "   请确保:"
+    log_warn "   1. config.yaml 文件存在于项目根目录"
+    log_warn "   2. docker-compose.yml 中包含 volume 映射"
 fi
 
 # 步骤 7: 健康检查
