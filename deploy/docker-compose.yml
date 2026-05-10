@@ -6,7 +6,7 @@ services:
     image: redis/redis-stack:latest
     container_name: interview-redis
     ports:
-      - "${REDIS_PORT:-6379}:${REDIS_PORT:-6379}"
+      - "${REDIS_EXTERNAL_PORT:-6379}:6379"  # 外部访问端口:容器内部端口
       - "8001:8001"  # RedisInsight
     volumes:
       - redis-data:/data
@@ -22,6 +22,10 @@ services:
     container_name: interview-agent
     env_file:
       - .env
+    environment:
+      # 重要：容器内部始终使用 Redis 的内部端口 6379
+      # REDIS_PORT 从 .env 文件读取的是外部端口，需要覆盖为内部端口
+      - REDIS_PORT=6379
     ports:
       - "${APP_PORT:-9023}:9023"  # 前端访问端口
     depends_on:
