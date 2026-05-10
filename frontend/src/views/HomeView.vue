@@ -42,13 +42,6 @@
       />
     </div>
 
-    <!-- 空状态提示 -->
-    <a-empty 
-      v-if="!loading && displayQuestions.length === 0 && !hasSearched" 
-      description="正在为您智能推荐面试题..." 
-      class="empty-state"
-    />
-
     <!-- 题目详情模态框 -->
     <QuestionDetailModal
       v-model="detailModalVisible"
