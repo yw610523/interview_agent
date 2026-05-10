@@ -1,5 +1,3 @@
-// Jenkinsfile - Interview Agent CI/CD
-// 通过 GitHub Webhook 触发自动部署
 pipeline {
     agent any
 
@@ -32,7 +30,7 @@ pipeline {
         string(name: 'SMTP_USER', defaultValue: 'ryan890219@qq.com', description: '发件人邮箱')
         password(name: 'SMTP_PASSWORD', defaultValue: 'yhgmvbegazuajdbg', description: 'SMTP 授权码')
 
-
+        // Firecrawl 配置
         string(name: 'FIRECRAWL_API_URL', defaultValue: 'http://192.168.1.15:3002', description: 'firecrawl访问地址')
     }
     

@@ -1,5 +1,5 @@
 """
-LLM 配置测试
+LLM 配置测试 (Redis 模式)
 
 测试 LLM 配置的增删改查和同步功能
 """
@@ -16,7 +16,7 @@ class TestLLMConfig:
     """LLM 配置测试类"""
 
     def test_01_read_llm_config(self):
-        """测试读取 LLM 配置"""
+        """测试读取 LLM 配置（优先 Redis）"""
         print("\n=== 测试1: 读取 LLM 配置 ===")
 
         llm_config = config_manager.get_config('llm')
@@ -48,7 +48,7 @@ class TestLLMConfig:
             print(f"[OK] Embedding Model: {llm_config.get('embedding_model')}")
 
     def test_02_update_llm_basic_config(self):
-        """测试更新 LLM 基础配置"""
+        """测试更新 LLM 基础配置（写入 Redis）"""
         print("\n=== 测试2: 更新 LLM 基础配置 ===")
 
         # 保存原始配置
@@ -74,16 +74,13 @@ class TestLLMConfig:
                 }
             }
 
-            # 保存配置
+            # 保存配置（写入 Redis）
             success = config_manager.save_config('llm', new_config)
             assert success, "保存 LLM 配置应该成功"
 
-            print(f"[OK] 配置已保存")
+            print(f"[OK] 配置已保存到 Redis")
 
-            # 重新加载配置
-            config_manager.reload()
-
-            # 验证配置已更新
+            # 验证配置已更新（直接读 Redis，无需 reload）
             updated_config = config_manager.get_config('llm')
             assert updated_config['openai']['api_key'] == 'sk-test-key-123456'
             assert updated_config['openai']['api_base'] == 'https://test.api.example.com/v1'
@@ -96,13 +93,12 @@ class TestLLMConfig:
             print(f"[OK] Embedding Model 已更新: {updated_config['embedding']['model']}")
 
         finally:
-            # 恢复原始配置
+            # 恢复原始配置（写回 Redis）
             config_manager.save_config('llm', original_config)
-            config_manager.reload()
             print(f"[OK] 已恢复原始配置")
 
     def test_03_update_token_limits(self):
-        """测试更新 Token 限制配置"""
+        """测试更新 Token 限制配置（写入 Redis）"""
         print("\n=== 测试3: 更新 Token 限制配置 ===")
 
         # 保存原始配置
@@ -119,9 +115,8 @@ class TestLLMConfig:
                 new_config['max_output_tokens'] = 4000
 
             config_manager.save_config('llm', new_config)
-            config_manager.reload()
 
-            # 验证配置
+            # 验证配置（读 Redis）
             updated_config = config_manager.get_config('llm')
             if 'openai' in updated_config:
                 assert updated_config['openai']['max_input_tokens'] == 16000
@@ -137,11 +132,10 @@ class TestLLMConfig:
         finally:
             # 恢复原始配置
             config_manager.save_config('llm', original_config)
-            config_manager.reload()
             print(f"[OK] 已恢复原始配置")
 
     def test_04_update_embedding_dimension(self):
-        """测试更新 Embedding 维度"""
+        """测试更新 Embedding 维度（写入 Redis）"""
         print("\n=== 测试4: 更新 Embedding 维度 ===")
 
         # 保存原始配置
@@ -156,9 +150,8 @@ class TestLLMConfig:
                 new_config['embedding_dimension'] = 3072
 
             config_manager.save_config('llm', new_config)
-            config_manager.reload()
 
-            # 验证配置
+            # 验证配置（读 Redis）
             updated_config = config_manager.get_config('llm')
             if 'embedding' in updated_config:
                 assert updated_config['embedding']['dimension'] == 3072
@@ -170,16 +163,11 @@ class TestLLMConfig:
         finally:
             # 恢复原始配置
             config_manager.save_config('llm', original_config)
-            config_manager.reload()
             print(f"[OK] 已恢复原始配置")
 
-    def test_05_config_persistence(self):
-        """测试配置持久化"""
-        print("\n=== 测试5: 配置持久化 ===")
-
-        import yaml
-        from pathlib import Path as PathLib
-        from app.config.config_manager import ConfigManager
+    def test_05_config_redis_storage(self):
+        """测试配置存储到 Redis"""
+        print("\n=== 测试5: 配置存储到 Redis ===")
 
         # 保存测试配置（嵌套结构）
         test_config = {
@@ -202,29 +190,14 @@ class TestLLMConfig:
 
         config_manager.save_config('llm', test_config)
 
-        # 从 ConfigManager 的覆盖目录读取文件（测试环境）
-        config_dir = ConfigManager._config_dir_override
-        if config_dir:
-            # 测试环境：使用临时目录
-            config_file = config_dir / 'llm.yaml'
-        else:
-            # 生产环境：使用项目根目录
-            config_file = PathLib(__file__).parent.parent.parent / 'config' / 'llm.yaml'
+        # 验证配置在 Redis 中
+        redis_config = config_manager.get_config('llm')
+        assert redis_config['openai']['api_key'] == 'sk-persist-test-key'
+        assert redis_config['openai']['model'] == 'persist-model'
 
-        assert config_file.exists(), "配置文件应该存在"
-
-        with open(config_file, 'r', encoding='utf-8') as f:
-            file_content = yaml.safe_load(f)
-
-        # 验证嵌套结构
-        assert file_content['openai']['api_key'] == 'sk-persist-test-key'
-        assert file_content['openai']['model'] == 'persist-model'
-
-        print(f"[OK] 配置已持久化到文件")
-        print(f"[OK] 文件内容验证通过")
-
-        # 恢复原始配置（由 conftest.py 统一处理）
-        print(f"[OK] 持久化测试完成")
+        print(f"[OK] 配置已保存到 Redis")
+        print(f"[OK] Redis 内容验证通过")
+        print(f"[OK] 持久化测试完成（Redis 模式）")
 
 
 if __name__ == '__main__':

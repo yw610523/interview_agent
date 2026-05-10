@@ -95,9 +95,18 @@ question_extraction_system: |-
   ## 输出格式：
   请以 JSON 数组格式返回，每个元素包含：
   {
-    "question": "面试题文本",
-    "answer": "详细的答案（Markdown格式）",
-    "category": "技术分类（如：Java基础、并发编程、JVM等）",
+    "title": "面试题文本（完整的疑问句）",
+    "answer": "详细的答案（Markdown格式，至少300字）",
+    "source_url": "来源网页URL",
+    "tags": ["相关技术标签"],
+    "importance_score": 0.8,
     "difficulty": "难度级别（easy/medium/hard）",
-    "importance": "重要性评分（1-5分）"
+    "category": "技术分类"
   }
+  
+  ## 重要性评分标准：
+  - 0.9-1.0: 核心技术概念，面试必问
+  - 0.7-0.8: 重要知识点，经常考察
+  - 0.5-0.6: 一般知识点，偶尔涉及
+  - 0.3-0.4: 边缘知识，较少出现
+  - 0.0-0.2: 冷门知识，很少考察

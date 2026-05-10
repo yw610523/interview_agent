@@ -339,6 +339,7 @@ const handleMasteryChange = async (value) => {
           })
           message.success('题目已隐藏')
           await loadFeedback()
+          // 通知父组件刷新（使用 hidden 类型表示题目被隐藏）
           emit('feedback-changed', {
             questionId: props.question.id,
             type: 'hidden',
@@ -353,15 +354,22 @@ const handleMasteryChange = async (value) => {
       // 自动软删除
       message.success(`题目已自动隐藏（重要性${Math.round(res.question_importance * 100)}%，${getMasteryText(value)}）`)
       await loadFeedback()
+      // 通知父组件刷新（传递掌握程度）
       emit('feedback-changed', {
         questionId: props.question.id,
-        type: 'hidden',
-        value: true
+        type: 'mastery',
+        value: value
       })
     } else {
       // 普通更新
       message.success('掌握程度已更新')
       await loadFeedback()
+      // 通知父组件刷新（传递掌握程度）
+      emit('feedback-changed', {
+        questionId: props.question.id,
+        type: 'mastery',
+        value: value
+      })
     }
   } catch (error) {
     message.error('更新失败')

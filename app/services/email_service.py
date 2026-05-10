@@ -16,7 +16,7 @@ def send_interview_email(recipient: str, questions: list):
     # 2. 设置发件人显示名称[cite: 2]
     display_name = "面试官 AI 助手"
     # 优先从 config.yaml 读取，兼容环境变量
-    smtp_config = config_manager.get_smtp_config()
+    smtp_config = config_manager.get_config('smtp')
     sender_email = smtp_config.get('user') or os.getenv("SMTP_USER")
     formatted_sender = f"{display_name} <{sender_email}>"
 

@@ -20,17 +20,9 @@ class TestPromptsConfig:
     @classmethod
     def setup_class(cls):
         """测试类开始前，保存原始 prompts 配置"""
-        cls._original_prompts = config_manager.get('prompts', {}).copy()
+        cls._original_prompts = config_manager.get_config('prompts').copy()
         print(
-            f"\n[SETUP] Saved original prompts config (question: {
-                len(
-                    cls._original_prompts.get(
-                        'question_extraction_system',
-                        ''))} chars, answer: {
-                len(
-                    cls._original_prompts.get(
-                        'answer_generation_system',
-                        ''))} chars)")
+            f"\n[SETUP] Saved original prompts config (question: {len(cls._original_prompts.get('question_extraction_system', ''))} chars, answer: {len(cls._original_prompts.get('answer_generation_system', ''))} chars)")
 
     @classmethod
     def teardown_class(cls):
@@ -41,8 +33,8 @@ class TestPromptsConfig:
         """测试读取 Prompts 配置"""
         print("\n=== Test 1: Read Prompts Config ===")
 
-        # 使用 get 方法获取 prompts 配置
-        prompts_config = config_manager.get('prompts', {})
+        # 使用 get_config 方法获取 prompts 配置
+        prompts_config = config_manager.get_config('prompts')
 
         assert prompts_config is not None
         assert isinstance(prompts_config, dict)
@@ -52,12 +44,8 @@ class TestPromptsConfig:
         for field in required_fields:
             assert field in prompts_config, f"Prompts config must contain {field} field"
 
-        print(
-            f"[OK] Question Extraction System: {
-                '[set]' if prompts_config.get('question_extraction_system') else '[empty]'}")
-        print(
-            f"[OK] Answer Generation System: {
-                '[set]' if prompts_config.get('answer_generation_system') else '[empty]'}")
+        print(f"[OK] Question Extraction System: {'[set]' if prompts_config.get('question_extraction_system') else '[empty]'}")
+        print(f"[OK] Answer Generation System: {'[set]' if prompts_config.get('answer_generation_system') else '[empty]'}")
         print(f"[OK] Question Extraction Length: {len(prompts_config.get('question_extraction_system', ''))} chars")
         print(f"[OK] Answer Generation Length: {len(prompts_config.get('answer_generation_system', ''))} chars")
 
@@ -72,9 +60,8 @@ class TestPromptsConfig:
         success = config_manager.save_config('prompts', new_config)
         assert success
 
-        config_manager.reload()
-
-        updated_config = config_manager.get('prompts', {})
+        # 直接读取 Redis，无需 reload
+        updated_config = config_manager.get_config('prompts')
         assert updated_config.get('question_extraction_system') == 'Test prompt for question extraction'
 
         print(f"[OK] Question Extraction Prompt updated")
@@ -90,9 +77,8 @@ class TestPromptsConfig:
         success = config_manager.save_config('prompts', new_config)
         assert success
 
-        config_manager.reload()
-
-        updated_config = config_manager.get('prompts', {})
+        # 直接读取 Redis，无需 reload
+        updated_config = config_manager.get_config('prompts')
         assert updated_config.get('answer_generation_system') == 'Test prompt for answer generation'
 
         print(f"[OK] Answer Generation Prompt updated")
@@ -110,20 +96,16 @@ class TestPromptsConfig:
         success = config_manager.save_config('prompts', new_config)
         assert success
 
-        config_manager.reload()
-
-        updated_config = config_manager.get('prompts', {})
+        # 直接读取 Redis，无需 reload
+        updated_config = config_manager.get_config('prompts')
         assert updated_config.get('question_extraction_system') == 'New question extraction prompt'
         assert updated_config.get('answer_generation_system') == 'New answer generation prompt'
 
         print(f"[OK] Both prompts updated")
 
     def test_05_config_persistence(self):
-        """测试配置持久化"""
+        """测试配置持久化到 Redis"""
         print("\n=== Test 5: Config Persistence ===")
-
-        import yaml
-        from app.config.config_manager import ConfigManager
 
         test_config = {
             'question_extraction_system': 'Persist test question prompt',
@@ -132,20 +114,13 @@ class TestPromptsConfig:
 
         config_manager.save_config('prompts', test_config)
 
-        # 从 ConfigManager 的覆盖目录读取文件
-        config_dir = ConfigManager._config_dir_override
-        assert config_dir is not None, "Config dir override should be set in test"
-        config_file = config_dir / 'prompts.yaml'
-        assert config_file.exists(), "Config file should exist in temp dir"
+        # 验证配置已保存到 Redis
+        redis_config = config_manager.get_config('prompts')
+        assert redis_config.get('question_extraction_system') == 'Persist test question prompt'
+        assert redis_config.get('answer_generation_system') == 'Persist test answer prompt'
 
-        with open(config_file, 'r', encoding='utf-8') as f:
-            file_content = yaml.safe_load(f)
-
-        assert file_content.get('question_extraction_system') == 'Persist test question prompt'
-        assert file_content.get('answer_generation_system') == 'Persist test answer prompt'
-
-        print(f"[OK] Config persisted to temp file")
-        print(f"[OK] File content verified")
+        print(f"[OK] Config persisted to Redis")
+        print(f"[OK] Redis content verified")
 
 
 if __name__ == '__main__':

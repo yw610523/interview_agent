@@ -1,7 +1,7 @@
 """
 pytest 配置
 
-在所有测试开始前设置临时配置目录
+在所有测试开始前设置临时配置目录并初始化 Redis 配置存储
 """
 import tempfile
 import shutil
@@ -17,7 +17,7 @@ def pytest_sessionstart(session):
     创建临时配置目录并复制所有配置文件
     """
     print("\n" + "=" * 80)
-    print("[TEST] Config test initialization")
+    print("[TEST] Config test initialization (Redis 模式)")
     print("=" * 80)
 
     # 创建临时目录
@@ -32,7 +32,12 @@ def pytest_sessionstart(session):
 
     # 设置 ConfigManager 使用临时目录
     ConfigManager.set_config_dir(temp_dir)
-    ConfigManager().reload()  # 重新加载配置
+    # 重置单例以便重新初始化
+    ConfigManager._instance = None
+    ConfigManager._initialized = False
+    # 重新创建实例，会触发 Redis 初始化和 YAML 同步
+    from app.config.config_manager import config_manager
+    print(f"[SETUP] ConfigManager initialized (Redis: {config_manager.redis_client is not None})")
 
 
 def pytest_sessionfinish(session, exitstatus):

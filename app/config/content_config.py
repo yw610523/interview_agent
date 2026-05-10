@@ -13,7 +13,6 @@ class ContentConfig:
     内容处理配置
     
     属性:
-        max_content_length_per_page: 每页最大内容长度（字符数）
         chunk_size: 块大小（字符数）
         chunk_overlap: 重叠长度（字符数）
         separators: 分隔符策略列表
@@ -21,7 +20,6 @@ class ContentConfig:
         max_chunks_per_page: 最大 Chunk 数量
         min_chunk_length: 最小 Chunk 长度（字符数）
     """
-    max_content_length_per_page: int = 2000
     chunk_size: int = 512
     chunk_overlap: int = 128
     separators: List[str] = field(default_factory=lambda: ['\n\n', '\n', '。', '！', '？', '.', '!', '?', ' '])

@@ -30,14 +30,89 @@ from app.services.llm_service import LLMService
 # 导入爬虫相关模块
 from app.services.sitemap_crawler import SitemapCrawler
 from app.services.vector_service import VectorService, VectorRecord
+# 导入统一配置管理器
+from app.config.config_manager import config_manager
 
 app = FastAPI(title="Interview AI Agent")
+
+def _mask_sensitive(key: str, value: str) -> str:
+    """对敏感信息进行脱敏处理"""
+    sensitive_keys = ['api_key', 'password', 'token', 'secret']
+    if any(k in key.lower() for k in sensitive_keys):
+        if not value or value == "" or value.startswith("$"):
+            return "*** (未配置)"
+        return value[:4] + "***" + value[-4:] if len(value) > 8 else "***"
+    return str(value)
+
+def _log_startup_config():
+    """启动时打印配置信息（脱敏）"""
+    logger.info("=" * 60)
+    logger.info("📋 系统配置信息（启动自检）")
+    logger.info("=" * 60)
+    
+    modules = ['llm', 'redis', 'smtp', 'content', 'crawler', 'rerank']
+    for module in modules:
+        try:
+            cfg = config_manager.get_config(module)
+            if not cfg:
+                continue
+            logger.info(f"\n--- {module.upper()} 配置 ---")
+            for k, v in cfg.items():
+                if isinstance(v, dict):
+                    for sub_k, sub_v in v.items():
+                        logger.info(f"  {module}.{sub_k}: {_mask_sensitive(sub_k, sub_v)}")
+                else:
+                    logger.info(f"  {k}: {_mask_sensitive(k, v)}")
+        except Exception as e:
+            logger.warning(f"读取 {module} 配置失败: {e}")
+    logger.info("=" * 60)
+
+@app.on_event("startup")
+async def startup_event():
+    _log_startup_config()
 
 # 配置日志
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+def _mask_sensitive(key: str, value: Any) -> str:
+    """对敏感信息进行脱敏处理"""
+    sensitive_keys = ['api_key', 'password', 'token', 'secret', 'user']
+    if any(k in key.lower() for k in sensitive_keys):
+        val_str = str(value)
+        if not val_str or val_str == "" or val_str.startswith("$"):
+            return "*** (未配置)"
+        return val_str[:4] + "***" + val_str[-4:] if len(val_str) > 8 else "***"
+    return str(value)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """启动时打印配置信息（脱敏）"""
+    logger.info("=" * 60)
+    logger.info("📋 系统配置信息（启动自检）")
+    logger.info("=" * 60)
+
+    from app.config.config_manager import config_manager
+    modules = ['llm', 'redis', 'smtp', 'content', 'crawler', 'rerank']
+    for module in modules:
+        try:
+            cfg = config_manager.get_config(module)
+            if not cfg:
+                continue
+            logger.info(f"\n--- {module.upper()} 配置 ---")
+            for k, v in cfg.items():
+                if isinstance(v, dict):
+                    for sub_k, sub_v in v.items():
+                        logger.info(f"  {module}.{sub_k}: {_mask_sensitive(sub_k, sub_v)}")
+                else:
+                    logger.info(f"  {k}: {_mask_sensitive(k, v)}")
+        except Exception as e:
+            logger.warning(f"读取 {module} 配置失败: {e}")
+    logger.info("=" * 60)
 
 # 全局变量存储最近一次爬取结果
 last_crawl_result: Optional[Dict[str, Any]] = None
@@ -1884,10 +1959,10 @@ async def update_crawler_config(config_data: Dict[str, Any]):
     更新爬虫配置并保存到独立配置文件
     """
     try:
-        # 使用 ConfigManager 保存到 crawler.yaml
+        # 使用 ConfigManager 保存到运行时配置（不写入文件）
         from app.config.config_manager import config_manager
 
-        success = config_manager.save_config('crawler', config_data)
+        success = config_manager.save_config('crawler', config_data, persist_to_file=False)
         if not success:
             raise HTTPException(status_code=500, detail="保存配置文件失败")
 
@@ -1896,7 +1971,7 @@ async def update_crawler_config(config_data: Dict[str, Any]):
 
         return {
             "status": "success",
-            "message": "爬虫配置已更新" + ("（已热加载，立即生效）" if reload_success else "（请重启服务使配置生效）"),
+            "message": "爬虫配置已更新（运行时生效，重启后恢复为配置文件默认值）",
             "hot_reload": reload_success,
             "config": config_data
         }
@@ -1952,39 +2027,33 @@ async def update_llm_config(config_data: Dict[str, Any]):
     try:
         from app.config.config_manager import config_manager
 
-        # 转换前端字段名到配置文件字段名（嵌套结构）
-        new_llm_config = {
-            'openai': {},
-            'embedding': {},
-            'rerank': {}
+        # 转换前端字段名到配置文件字段名
+        config_mapping = {
+            'openai_api_key': 'openai_api_key',
+            'openai_api_base': 'openai_api_base',
+            'openai_model': 'model',
+            'openai_embedding_model': 'embedding_model',
+            'embedding_dimension': 'embedding_dimension',
+            'model_max_input_tokens': 'max_input_tokens',
+            'model_max_output_tokens': 'max_output_tokens',
+            'rerank_enabled': 'rerank_enabled',
+            'rerank_model_name': 'rerank_model_name'
         }
-        
-        # OpenAI 配置
-        if config_data.get('openai_api_key') and config_data['openai_api_key'] != '********':
-            new_llm_config['openai']['api_key'] = config_data['openai_api_key']
-        if config_data.get('openai_api_base'):
-            new_llm_config['openai']['api_base'] = config_data['openai_api_base']
-        if config_data.get('openai_model'):
-            new_llm_config['openai']['model'] = config_data['openai_model']
-        if config_data.get('model_max_input_tokens') and config_data['model_max_input_tokens'] != '':
-            new_llm_config['openai']['max_input_tokens'] = int(config_data['model_max_input_tokens'])
-        if config_data.get('model_max_output_tokens') and config_data['model_max_output_tokens'] != '':
-            new_llm_config['openai']['max_output_tokens'] = int(config_data['model_max_output_tokens'])
-        
-        # Embedding 配置
-        if config_data.get('openai_embedding_model'):
-            new_llm_config['embedding']['model'] = config_data['openai_embedding_model']
-        if config_data.get('embedding_dimension'):
-            new_llm_config['embedding']['dimension'] = int(config_data['embedding_dimension'])
-        
-        # Rerank 配置
-        if 'rerank_enabled' in config_data:
-            new_llm_config['rerank']['enabled'] = config_data['rerank_enabled']
-        if config_data.get('rerank_model_name'):
-            new_llm_config['rerank']['model'] = config_data['rerank_model_name']
 
-        # 使用 ConfigManager 保存到 llm.yaml
-        success = config_manager.save_config('llm', new_llm_config)
+        # 构建新的 LLM 配置
+        new_llm_config = {}
+        for key, value in config_data.items():
+            if key in config_mapping:
+                yaml_key = config_mapping[key]
+                if value is not None and value != '' and value != '********':
+                    # 转换数字类型
+                    if key in ['embedding_dimension', 'model_max_input_tokens', 'model_max_output_tokens']:
+                        new_llm_config[yaml_key] = int(value)
+                    else:
+                        new_llm_config[yaml_key] = value
+
+        # 使用 ConfigManager 保存到运行时配置（不写入文件）
+        success = config_manager.save_config('llm', new_llm_config, persist_to_file=False)
         if not success:
             raise HTTPException(status_code=500, detail="保存配置文件失败")
 
@@ -1993,7 +2062,7 @@ async def update_llm_config(config_data: Dict[str, Any]):
 
         return {
             "status": "success",
-            "message": "模型配置已更新" + ("（已热加载，立即生效）" if reload_success else "（请重启服务使配置生效）"),
+            "message": "模型配置已更新（运行时生效，重启后恢复为配置文件默认值）",
             "hot_reload": reload_success,
             "config": config_data
         }
@@ -2047,8 +2116,8 @@ async def update_redis_config(config_data: Dict[str, Any]):
                 else:
                     new_redis_config[key] = value
 
-        # 使用 ConfigManager 保存到 redis.yaml
-        success = config_manager.save_config('redis', new_redis_config)
+        # 使用 ConfigManager 保存到运行时配置（不写入文件）
+        success = config_manager.save_config('redis', new_redis_config, persist_to_file=False)
         if not success:
             raise HTTPException(status_code=500, detail="保存配置文件失败")
 
@@ -2057,7 +2126,7 @@ async def update_redis_config(config_data: Dict[str, Any]):
 
         return {
             "status": "success",
-            "message": "Redis配置已更新" + ("（已热加载，立即生效）" if reload_success else "（请重启服务使配置生效）"),
+            "message": "Redis配置已更新（运行时生效，重启后恢复为配置文件默认值）",
             "hot_reload": reload_success,
             "config": config_data
         }
@@ -2095,8 +2164,8 @@ async def update_email_config(config_data: Dict[str, Any]):
                     else:
                         new_smtp_config[yaml_key] = value
 
-        # 使用 ConfigManager 保存到 smtp.yaml
-        success = config_manager.save_config('smtp', new_smtp_config)
+        # 使用 ConfigManager 保存到运行时配置（不写入文件）
+        success = config_manager.save_config('smtp', new_smtp_config, persist_to_file=False)
         if not success:
             raise HTTPException(status_code=500, detail="保存配置文件失败")
 
@@ -2105,7 +2174,7 @@ async def update_email_config(config_data: Dict[str, Any]):
 
         return {
             "status": "success",
-            "message": "邮件配置已更新" + ("（已热加载，立即生效）" if reload_success else "（请重启服务使配置生效）"),
+            "message": "邮件配置已更新（运行时生效，重启后恢复为配置文件默认值）",
             "hot_reload": reload_success,
             "config": config_data
         }
@@ -2124,7 +2193,7 @@ async def test_email():
         from app.config.config_manager import config_manager
 
         # 获取测试邮箱
-        smtp_config = config_manager.get_smtp_config()
+        smtp_config = config_manager.get_config('smtp')
         test_user = smtp_config.get('test_user')
         if not test_user:
             raise HTTPException(status_code=400, detail="未配置测试邮箱(smtp.test_user)")
@@ -2223,7 +2292,6 @@ async def get_content_config_api():
         return {
             "status": "success",
             "config": {
-                "max_content_length_per_page": content_data.get('max_content_length_per_page', 2000),
                 "chunk_size": content_data.get('chunk_size', 512),
                 "chunk_overlap": content_data.get('chunk_overlap', 128),
                 "separators": content_data.get('separators', ['\n\n', '\n', '。', '！', '？', '.', '!', '?', ' ']),
@@ -2247,11 +2315,11 @@ async def update_content_config(config_data: Dict[str, Any]):
 
         # 构建新的内容处理配置
         new_content_config = {}
-        for key in ['max_content_length_per_page', 'chunk_size', 'chunk_overlap', 'chunking_mode', 'max_chunks_per_page', 'min_chunk_length']:
+        for key in ['chunk_size', 'chunk_overlap', 'chunking_mode', 'max_chunks_per_page', 'min_chunk_length']:
             if key in config_data:
                 value = config_data[key]
                 # 转换数值类型为整数
-                if key in ['max_content_length_per_page', 'chunk_size', 'chunk_overlap', 'max_chunks_per_page', 'min_chunk_length']:
+                if key in ['chunk_size', 'chunk_overlap', 'max_chunks_per_page', 'min_chunk_length']:
                     new_content_config[key] = int(value)
                 else:
                     new_content_config[key] = value
@@ -2260,14 +2328,14 @@ async def update_content_config(config_data: Dict[str, Any]):
         if 'separators' in config_data and isinstance(config_data['separators'], list):
             new_content_config['separators'] = config_data['separators']
 
-        # 使用 ConfigManager 保存到 content.yaml
-        success = config_manager.save_config('content', new_content_config)
+        # 使用 ConfigManager 保存到运行时配置（不写入文件）
+        success = config_manager.save_config('content', new_content_config, persist_to_file=False)
         if not success:
             raise HTTPException(status_code=500, detail="保存配置文件失败")
 
         return {
             "status": "success",
-            "message": "内容处理配置已更新（已热加载，立即生效）",
+            "message": "内容处理配置已更新（运行时生效，重启后恢复为配置文件默认值）",
             "hot_reload": True
         }
     except Exception as e:
@@ -2287,40 +2355,36 @@ async def get_system_config():
         # 爬虫配置
         crawler_config = load_crawler_config()
 
-        # 模型配置：从 llm.yaml 读取（包含 OpenAI、Embedding 和 Rerank）
-        llm_config_data = config_manager.get_llm_config()
+        # 模型配置：从 llm.yaml 读取（包含 Rerank 配置）
+        llm_config_data = config_manager.get_config('llm')
         
-        # 支持嵌套结构和平铺结构
-        if 'openai' in llm_config_data:
-            # 嵌套结构
-            openai_cfg = llm_config_data.get('openai', {})
-            embedding_cfg = llm_config_data.get('embedding', {})
-            rerank_cfg = llm_config_data.get('rerank', {})
-            
-            llm_config = {
-                "openai_api_key": openai_cfg.get('api_key', ''),
-                "openai_api_base": openai_cfg.get('api_base', ''),
-                "openai_model": openai_cfg.get('model', 'gpt-4o-mini'),
-                "openai_embedding_model": embedding_cfg.get('model', 'text-embedding-3-small'),
-                "embedding_dimension": embedding_cfg.get('dimension', 1536),
-                "model_max_input_tokens": str(openai_cfg.get('max_input_tokens', '')),
-                "model_max_output_tokens": str(openai_cfg.get('max_output_tokens', '')),
-                "rerank_enabled": rerank_cfg.get('enabled', False),
-                "rerank_model_name": rerank_cfg.get('model', 'BAAI/bge-reranker-v2-m3'),
-            }
-        else:
-            # 平铺结构（向后兼容）
-            llm_config = {
-                "openai_api_key": llm_config_data.get('openai_api_key', ''),
-                "openai_api_base": llm_config_data.get('openai_api_base', ''),
-                "openai_model": llm_config_data.get('model', 'gpt-4o-mini'),
-                "openai_embedding_model": llm_config_data.get('embedding_model', 'text-embedding-3-small'),
-                "embedding_dimension": llm_config_data.get('embedding_dimension', 1536),
-                "model_max_input_tokens": str(llm_config_data.get('max_input_tokens', '')),
-                "model_max_output_tokens": str(llm_config_data.get('max_output_tokens', '')),
-                "rerank_enabled": llm_config_data.get('rerank_enabled', False),
-                "rerank_model_name": llm_config_data.get('rerank_model_name', 'BAAI/bge-reranker-v2-m3'),
-            }
+        # 从嵌套结构中读取配置
+        openai_config = llm_config_data.get('openai', {})
+        embedding_config = llm_config_data.get('embedding', {})
+        rerank_config_nested = llm_config_data.get('rerank', {})
+        
+        llm_config = {
+            "openai_api_key": openai_config.get('api_key', ''),
+            "openai_api_base": openai_config.get('api_base', ''),
+            "openai_model": openai_config.get('model', 'gpt-4o-mini'),
+            "openai_embedding_model": embedding_config.get('model', 'text-embedding-3-small'),
+            "embedding_dimension": embedding_config.get('dimension', 1536),
+            "model_max_input_tokens": str(openai_config.get('max_input_tokens', '')),
+            "model_max_output_tokens": str(openai_config.get('max_output_tokens', '')),
+            "rerank_enabled": rerank_config_nested.get('enabled', False),
+            "rerank_model_name": rerank_config_nested.get('model', 'BAAI/bge-reranker-v2-m3'),
+        }
+
+        # Rerank 配置：兼容旧版本，从 rerank.yaml 读取（如果存在）
+        rerank_config_data = config_manager.get_config('rerank')
+        rerank_enabled = rerank_config_data.get('enabled', False)
+        if isinstance(rerank_enabled, str):
+            rerank_enabled = rerank_enabled.lower() in ('true', '1', 'yes')
+
+        # 如果 rerank.yaml 中有配置，优先使用（向后兼容）
+        if rerank_config_data.get('enabled') is not None:
+            llm_config['rerank_enabled'] = rerank_enabled
+            llm_config['rerank_model_name'] = rerank_config_data.get('model', llm_config['rerank_model_name'])
 
         rerank_config = {
             "enabled": llm_config['rerank_enabled'],
@@ -2328,8 +2392,8 @@ async def get_system_config():
             "description": "Rerank 模型复用 LLM 的 API Key 和 Base URL"
         }
 
-        # Redis配置：从 config.yaml 读取
-        redis_config_data = config_manager.get_redis_config()
+        # Redis配置：从 redis.yaml 读取
+        redis_config_data = config_manager.get_config('redis')
         redis_config = {
             "host": redis_config_data.get('host', 'localhost'),
             "port": redis_config_data.get('port', 6379),
@@ -2337,8 +2401,8 @@ async def get_system_config():
             "description": "Redis运行在Docker容器内，App自动连接"
         }
 
-        # 邮件配置：从 config.yaml 读取
-        smtp_config_data = config_manager.get_smtp_config()
+        # 邮件配置：从 smtp.yaml 读取
+        smtp_config_data = config_manager.get_config('smtp')
         email_config = {
             "smtp_server": smtp_config_data.get('server', ''),
             "smtp_port": smtp_config_data.get('port', 587),
@@ -2353,7 +2417,6 @@ async def get_system_config():
         # 内容处理配置：从 content.yaml 读取
         content_config_data = config_manager.get_config('content')
         content_config = {
-            "max_content_length_per_page": content_config_data.get('max_content_length_per_page', 2000),
             "chunk_size": content_config_data.get('chunk_size', 512),
             "chunk_overlap": content_config_data.get('chunk_overlap', 128),
             "separators": content_config_data.get('separators', ['\n\n', '\n', '。', '！', '？', '.', '!', '?', ' ']),
@@ -2438,8 +2501,8 @@ async def update_prompts_config(request: dict):
             current_prompts['answer_generation_system'] = answer_generation
             logger.info("已更新答案生成提示词")
 
-        # 使用 ConfigManager 保存到 prompts.yaml
-        success = config_manager.save_config('prompts', current_prompts)
+        # 使用 ConfigManager 保存到运行时配置（不写入文件）
+        success = config_manager.save_config('prompts', current_prompts, persist_to_file=False)
         if not success:
             raise HTTPException(status_code=500, detail="保存配置文件失败")
 
@@ -2447,7 +2510,7 @@ async def update_prompts_config(request: dict):
 
         return {
             "status": "success",
-            "message": "提示词配置已更新"
+            "message": "提示词配置已更新（运行时生效，重启后恢复为配置文件默认值）"
         }
     except HTTPException:
         raise

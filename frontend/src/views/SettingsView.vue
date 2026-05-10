@@ -246,13 +246,6 @@
             :label-col="{ span: 8 }"
             :wrapper-col="{ span: 16 }"
         >
-          <a-form-item label="单页最大长度">
-            <a-input-number v-model:value="contentConfig.max_content_length_per_page" :min="500" :max="10000" :step="100"/>
-            <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
-              超过此长度的页面会被切分为多个 Chunk 处理（字符数）
-            </div>
-          </a-form-item>
-
           <a-form-item label="切分模式">
             <a-select v-model:value="contentConfig.chunking_mode">
               <a-select-option value="semantic">语义切分（推荐）</a-select-option>
@@ -268,9 +261,6 @@
 
           <a-form-item label="块大小 (Chunk Size)">
             <a-input-number v-model:value="contentConfig.chunk_size" :min="100" :max="4000" :step="64"/>
-            <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
-              推荐值：256（精细）/ 512（平衡）/ 1024（长文档）
-            </div>
           </a-form-item>
 
           <a-form-item label="重叠长度 (Overlap)">
@@ -471,7 +461,6 @@ const promptsConfig = ref({
 
 // 内容处理配置
 const contentConfig = ref({
-  max_content_length_per_page: 2000,
   chunk_size: 512,
   chunk_overlap: 128,
   separators: ['\n\n', '\n', '。', '！', '？', '.', '!', '?', ' '],

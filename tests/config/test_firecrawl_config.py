@@ -50,8 +50,7 @@ class TestFirecrawlConfig:
             success = config_manager.save_config('firecrawl', new_config)
             assert success
 
-            config_manager.reload()
-
+            # 直接读取 Redis，无需 reload
             updated_config = config_manager.get_config('firecrawl')
             assert updated_config.get('enabled') is True
             assert updated_config.get('api_url') == 'http://test.firecrawl.com:3002'
@@ -63,7 +62,6 @@ class TestFirecrawlConfig:
 
         finally:
             config_manager.save_config('firecrawl', original_config)
-            config_manager.reload()
             print(f"[OK] Restored original config")
 
     def test_03_toggle_firecrawl_enabled(self):
@@ -77,7 +75,6 @@ class TestFirecrawlConfig:
             new_config = original_config.copy()
             new_config['enabled'] = True
             config_manager.save_config('firecrawl', new_config)
-            config_manager.reload()
 
             assert config_manager.get_config('firecrawl').get('enabled') is True
             print(f"[OK] Firecrawl enabled")
@@ -85,21 +82,16 @@ class TestFirecrawlConfig:
             # 禁用
             new_config['enabled'] = False
             config_manager.save_config('firecrawl', new_config)
-            config_manager.reload()
 
             assert config_manager.get_config('firecrawl').get('enabled') is False
             print(f"[OK] Firecrawl disabled")
 
         finally:
             config_manager.save_config('firecrawl', original_config)
-            config_manager.reload()
 
     def test_04_config_persistence(self):
-        """测试配置持久化"""
+        """测试配置持久化到 Redis"""
         print("\n=== Test 4: Config Persistence ===")
-
-        import yaml
-        from pathlib import Path as PathLib
 
         test_config = {
             'enabled': True,
@@ -110,16 +102,13 @@ class TestFirecrawlConfig:
 
         config_manager.save_config('firecrawl', test_config)
 
-        config_file = PathLib(__file__).parent.parent.parent / 'config' / 'firecrawl.yaml'
-        assert config_file.exists()
+        # 验证配置已保存到 Redis
+        redis_config = config_manager.get_config('firecrawl')
+        assert redis_config.get('enabled') is True
+        assert redis_config.get('api_url') == 'http://persist.firecrawl.com:3002'
+        assert redis_config.get('timeout') == 500
 
-        with open(config_file, 'r', encoding='utf-8') as f:
-            file_content = yaml.safe_load(f)
-
-        assert file_content.get('enabled') is True
-        assert file_content.get('api_url') == 'http://persist.firecrawl.com:3002'
-
-        print(f"[OK] Config persisted to file")
+        print(f"[OK] Config persisted to Redis")
 
         original_config = config_manager.get_config('firecrawl').copy()
         config_manager.save_config('firecrawl', original_config)

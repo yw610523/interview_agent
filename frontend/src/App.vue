@@ -131,7 +131,7 @@ html, body {
 }
 
 .logo {
-  margin-right: 0 !important;
+  margin-right: 24px !important;
   padding-left: 8px;
 }
 

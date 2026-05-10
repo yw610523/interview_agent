@@ -49,6 +49,7 @@ class FeedbackService:
         self.openai_client = None
         self.rerank_enabled = False
         self.rerank_model = "rerank-sf"
+        self.rerank_api_base = ""  # 保存 Rerank API base URL
         self._init_redis()
         self._init_rerank()
 
@@ -66,38 +67,48 @@ class FeedbackService:
             logger.error(f"FeedbackService: Redis 客户端初始化失败: {str(e)}")
 
     def _init_rerank(self):
-        """初始化 Rerank 客户端（复用 LLM 的配置）"""
+        """初始化 Rerank 客户端（使用独立的配置）"""
         try:
             from openai import OpenAI
             
             # 导入统一配置管理器
             from app.config.config_manager import config_manager
 
-            # 读取 Rerank 配置：优先从 config.yaml 读取
-            rerank_config = config_manager.get_rerank_config()
-            rerank_enabled = rerank_config.get('enabled', False)
-            if isinstance(rerank_enabled, str):
-                rerank_enabled = rerank_enabled.lower() in ('true', '1', 'yes')
-            self.rerank_enabled = rerank_enabled
-            self.rerank_model = rerank_config.get('model') or os.getenv("RERANK_MODEL", "rerank-sf")
+            # 读取 LLM 配置（包含 rerank 嵌套结构）
+            llm_config = config_manager.get_config('llm')
+            
+            # 支持嵌套结构和平铺结构
+            if 'rerank' in llm_config:
+                # 嵌套结构
+                rerank_cfg = llm_config.get('rerank', {})
+                self.rerank_enabled = rerank_cfg.get('enabled', False)
+                self.rerank_model = rerank_cfg.get('model', 'BAAI/bge-reranker-v2-m3')
+                rerank_api_key = rerank_cfg.get('api_key', '')
+                rerank_api_base = rerank_cfg.get('api_base', '')
+            else:
+                # 平铺结构（向后兼容）
+                rerank_enabled = llm_config.get('rerank_enabled', False)
+                if isinstance(rerank_enabled, str):
+                    rerank_enabled = rerank_enabled.lower() in ('true', '1', 'yes')
+                self.rerank_enabled = rerank_enabled
+                self.rerank_model = llm_config.get('rerank_model_name', 'BAAI/bge-reranker-v2-m3')
+                rerank_api_key = llm_config.get('rerank_api_key', '')
+                rerank_api_base = llm_config.get('rerank_api_base', '')
 
             if not self.rerank_enabled:
                 logger.info("FeedbackService: Rerank 未启用")
                 return
 
-            # 获取 Rerank API 配置，如果为空则复用 OpenAI 配置
-            rerank_api_key = rerank_config.get('api_key') or os.getenv("RERANK_API_KEY", "").strip()
-            rerank_api_base = rerank_config.get('api_url') or os.getenv("RERANK_API_URL", "").strip()
-
-            # 如果 Rerank 配置为空，复用 OpenAI 配置
+            # 如果 Rerank API Key 为空，尝试从环境变量获取
             if not rerank_api_key:
-                rerank_api_key = config_manager.get('llm.openai_api_key') or os.getenv("OPENAI_API_KEY")
-                logger.info("FeedbackService: Rerank API Key 未配置，复用 OPENAI_API_KEY")
+                rerank_api_key = os.getenv("RERANK_API_KEY", "").strip()
 
+            # 如果 Rerank API Base 为空，尝试从环境变量获取
             if not rerank_api_base:
-                # 如果 Rerank API URL 未配置，复用 OPENAI_API_BASE
-                rerank_api_base = config_manager.get('llm.openai_api_base') or os.getenv("OPENAI_API_BASE")
-                logger.info("FeedbackService: Rerank API URL 未配置，复用 OPENAI_API_BASE")
+                rerank_api_base = os.getenv("RERANK_API_BASE", "https://siliconflow.cn/v1").strip()
+
+            # 保存 rerank_api_base 供后续使用
+            self.rerank_api_base = rerank_api_base
 
             # 初始化客户端
             if rerank_api_key:
@@ -106,7 +117,7 @@ class FeedbackService:
                 else:
                     self.openai_client = OpenAI(api_key=rerank_api_key)
                 logger.info(
-                    f"FeedbackService: Rerank 客户端初始化成功 (model={self.rerank_model})"
+                    f"FeedbackService: Rerank 客户端初始化成功 (model={self.rerank_model}, base_url={rerank_api_base})"
                 )
             else:
                 logger.warning("FeedbackService: Rerank 已启用但 API Key 未配置")
@@ -441,9 +452,8 @@ class FeedbackService:
             # 调用 Rerank API - 使用标准的 /v1/rerank endpoint
             import requests
 
-            # 获取 base_url 并构造 rerank endpoint
-            base_url = str(self.openai_client.base_url).rstrip('/')
-            rerank_url = f"{base_url}/rerank"
+            # 使用独立的 Rerank API base URL（不与 OpenAI 耦合）
+            rerank_url = f"{self.rerank_api_base.rstrip('/')}/rerank"
 
             headers = {
                 "Authorization": f"Bearer {self.openai_client.api_key}",
@@ -808,3 +818,5 @@ class FeedbackService:
             return []
 
 # Trigger reload
+
+

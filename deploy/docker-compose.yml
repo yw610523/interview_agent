@@ -38,8 +38,6 @@ services:
       - ../config/content.yaml:/app/config/content.yaml:ro
       - ../config/prompts.yaml:/app/config/prompts.yaml:ro
       - ../config/service.yaml:/app/config/service.yaml:ro
-      # 兼容模式：如果存在 config.yaml 也映射（可选）
-      - ../config.yaml:/app/config.yaml:ro
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "wget", "-qO-", "http://localhost:9023/" ]

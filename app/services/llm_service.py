@@ -585,7 +585,6 @@ def example():
         from app.config.content_config import get_content_config
         content_config = get_content_config()
         
-        max_content_length = content_config.max_content_length_per_page
         chunk_size = content_config.chunk_size
         chunk_overlap = content_config.chunk_overlap
         separators = content_config.separators
@@ -593,12 +592,10 @@ def example():
         max_chunks = content_config.max_chunks_per_page
         min_chunk_length = content_config.min_chunk_length
         
-        # 决定使用哪个长度进行切分
-        # 如果内容超过 max_content_length，则使用 chunk_size 进行精细切分
-        # 否则直接处理整个内容
-        if len(content) <= max_content_length:
+        # 判断是否需要分块：如果内容长度小于 chunk_size 的2倍，不分块
+        if len(content) <= chunk_size * 2:
             chunks = [content]
-            logger.info(f"页面 {url} 内容长度({len(content)}字符)在阈值内，无需分块")
+            logger.info(f"页面 {url} 内容长度({len(content)}字符)较短，无需分块")
         else:
             # 根据切分模式选择不同的策略
             if chunking_mode == "markdown":
@@ -676,8 +673,12 @@ URL: {url}
 
                     result = response.choices[0].message.content or ""
                     logger.info(f"LLM返回内容长度: {len(result)} 字符")
+                    
+                    # 打印返回内容的前500字符用于调试
+                    logger.info(f"LLM返回内容前500字符:\n{result[:500]}")
 
                     questions = self._parse_response(result)
+                    logger.info(f"_parse_response 解析结果: {len(questions)} 个问题")
 
                     # 检查是否成功解析到问题
                     if questions:
@@ -766,9 +767,13 @@ URL: {url}
 
                 questions = []
                 for item in data:
+                    # 兼容多种字段名：question 或 title
+                    title = item.get("title") or item.get("question", "")
+                    answer = item.get("answer", "")
+                    
                     question = ParsedQuestion(
-                        title=item.get("title", ""),
-                        answer=item.get("answer", ""),
+                        title=title,
+                        answer=answer,
                         source_url=item.get("source_url", ""),
                         tags=item.get("tags", []),
                         importance_score=item.get("importance_score", 0.0),
@@ -777,6 +782,8 @@ URL: {url}
                     )
                     if question.title and question.answer:
                         questions.append(question)
+                    else:
+                        logger.warning(f"跳过无效问题: title='{title[:50] if title else ''}', answer_length={len(answer)}")
 
                 return questions
             else:

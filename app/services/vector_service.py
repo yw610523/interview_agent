@@ -79,8 +79,13 @@ class VectorService:
             logger.error(f"Redis 客户端初始化失败: {str(e)}")
 
         # 2. 初始化 OpenAI 客户端（用于生成 Embedding）
-        api_key = config_manager.get('llm.openai_api_key') or os.getenv("OPENAI_API_KEY")
-        api_base = config_manager.get('llm.openai_api_base') or os.getenv("OPENAI_API_BASE")
+        # 优先使用独立的 Embedding 配置，兼容 LLM 配置和环境变量
+        api_key = config_manager.get('llm.embedding.api_key') or \
+                  config_manager.get('llm.openai.api_key') or \
+                  os.getenv("OPENAI_API_KEY")
+        api_base = config_manager.get('llm.embedding.api_base') or \
+                   config_manager.get('llm.openai.api_base') or \
+                   os.getenv("OPENAI_API_BASE")
 
         if api_key and OPENAI_AVAILABLE:
             try:
@@ -101,22 +106,23 @@ class VectorService:
             return self._simple_hash_embedding(text)
 
         try:
-            # 优先从 config.yaml 读取，兼容环境变量
-            embedding_model = config_manager.get('llm.embedding_model') or \
-                             os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+            # 优先从 config.yaml 读取 Embedding 模型名称
+            embedding_model = config_manager.get('llm.embedding.model') or \
+                             config_manager.get('llm.embedding_model') or \
+                             os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
             response = self.openai_client.embeddings.create(
                 input=text,
                 model=embedding_model,
             )
 
+            # 检查响应类型，确保不是字符串
+            if isinstance(response, str):
+                logger.error(f"Embedding API 返回字符串而不是对象: {response[:200]}")
+                raise Exception(f"API 返回字符串响应: {response[:100]}...")
+
             # 检查响应格式是否正确
             if not hasattr(response, "data") or not response.data:
-                logger.error(f"Embedding API 响应格式异常: {response}")
-                # 记录详细的错误信息
-                if isinstance(response, str):
-                    logger.error(f"API 返回字符串而不是对象: {response[:200]}")
-                else:
-                    logger.error(f"API 响应类型: {type(response)}")
+                logger.error(f"Embedding API 响应格式异常: {type(response)} - {response}")
                 raise Exception(
                     f"Embedding API 响应格式异常: {type(response)} - {response}"
                 )
@@ -127,7 +133,13 @@ class VectorService:
 
             return response.data[0].embedding
         except Exception as e:
-            logger.error(f"生成 Embedding 失败: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"生成 Embedding 失败: {error_msg}")
+            
+            # 如果是网络错误或API错误，记录详细信息
+            if "Connection" in error_msg or "HTTP" in error_msg or "307" in error_msg:
+                logger.error(f"可能是 API 端点配置错误，请检查 EMBEDDING_API_BASE 配置")
+            
             logger.warning("使用简单哈希生成向量作为备用方案")
             return self._simple_hash_embedding(text)
 
@@ -162,11 +174,16 @@ class VectorService:
                 num_docs = getattr(info, 'num_docs', 0)
                 attributes = getattr(info, 'attributes', [])
             
+            # 确保 attributes 是列表
+            if not isinstance(attributes, list):
+                logger.warning(f"attributes 不是列表类型: {type(attributes)}")
+                attributes = []
+            
             # 检查是否包含 importance_score 字段
             has_importance_field = any(
-                attr.get('identifier') == 'importance_score' or 
-                (isinstance(attr, dict) and attr.get('identifier') == 'importance_score')
-                for attr in (attributes if isinstance(attributes, list) else [])
+                (isinstance(attr, dict) and attr.get('identifier') == 'importance_score') or
+                (hasattr(attr, 'identifier') and getattr(attr, 'identifier', None) == 'importance_score')
+                for attr in attributes
             )
             
             if has_importance_field:
@@ -196,7 +213,8 @@ class VectorService:
             # 创建新索引
             try:
                 # 优先从 config.yaml 读取，兼容环境变量
-                embedding_dim = config_manager.get('llm.embedding_dimension') or \
+                embedding_dim = config_manager.get('llm.embedding.dimension') or \
+                               config_manager.get('llm.embedding_dimension') or \
                                int(os.getenv("EMBEDDING_DIMENSION", "1536"))
                 from redis.commands.search.field import NumericField
                 schema = [

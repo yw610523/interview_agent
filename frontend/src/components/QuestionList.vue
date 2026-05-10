@@ -16,9 +16,18 @@
             </template>
           </a-list-item-meta>
           
-          <!-- 永久删除按钮（仅在已掌握列表中显示） -->
-          <template v-if="showPermanentDelete" #actions>
+          <!-- 操作按钮（仅在已掌握列表中显示） -->
+          <template v-if="showPermanentDelete || showRestore" #actions>
             <a-button 
+              v-if="showRestore"
+              type="link" 
+              size="small"
+              @click.stop="$emit('restore', item.id)"
+            >
+              恢复
+            </a-button>
+            <a-button 
+              v-if="showPermanentDelete"
               type="link" 
               danger 
               size="small"
@@ -51,10 +60,14 @@ defineProps({
   showPermanentDelete: {
     type: Boolean,
     default: false
+  },
+  showRestore: {
+    type: Boolean,
+    default: false
   }
 })
 
-defineEmits(['itemClick', 'permanentDelete'])
+defineEmits(['itemClick', 'permanentDelete', 'restore'])
 </script>
 
 <style scoped>

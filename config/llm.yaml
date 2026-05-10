@@ -41,10 +41,10 @@ openai:
 embedding:
   # API 基础 URL：嵌入服务的端点
   # 如果留空，则复用 openai.api_base
-  api_base: ${EMBEDDING_API_BASE:-${OPENAI_API_BASE}}
+  api_base: ${EMBEDDING_API_BASE:-https://api.siliconflow.cn/v1}
   
   # API 密钥：如果留空，则复用 openai.api_key
-  api_key: ${EMBEDDING_API_KEY:-${OPENAI_API_KEY}}
+  api_key: ${EMBEDDING_API_KEY:-}
   
   # 嵌入模型名称：文本转向量的模型
   # - text-embedding-3-small: OpenAI 小型模型（1536维）
@@ -74,7 +74,7 @@ rerank:
   enabled: ${RERANK_ENABLED:-false}
   
   # API 基础 URL：重排序服务的端点
-  api_base: ${RERANK_API_BASE:-https://siliconflow.cn/v1}
+  api_base: ${RERANK_API_BASE:-https://api.siliconflow.cn/v1}
   
   # API 密钥：如果留空，则复用 openai.api_key
   api_key: ${RERANK_API_KEY:-}

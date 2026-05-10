@@ -23,7 +23,7 @@ def test_config_loading():
     
     # 测试 SMTP 配置
     print("\n📧 SMTP 配置:")
-    smtp_config = config_manager.get_smtp_config()
+    smtp_config = config_manager.get_config('smtp')
     print(f"  - Server: {smtp_config.get('server')}")
     print(f"  - Port: {smtp_config.get('port')}")
     print(f"  - User: {smtp_config.get('user', '***已配置***')}")
@@ -31,7 +31,7 @@ def test_config_loading():
     
     # 测试 LLM 配置
     print("\n🤖 LLM 配置:")
-    llm_config = config_manager.get_llm_config()
+    llm_config = config_manager.get_config('llm')
     print(f"  - API Key: {'***已配置***' if llm_config.get('openai_api_key') else '❌ 未配置'}")
     print(f"  - API Base: {llm_config.get('openai_api_base')}")
     print(f"  - Model: {llm_config.get('model')}")
@@ -42,7 +42,7 @@ def test_config_loading():
     
     # 测试 Rerank 配置
     print("\n🔄 Rerank 配置:")
-    rerank_config = config_manager.get_rerank_config()
+    rerank_config = config_manager.get_config('rerank')
     print(f"  - Enabled: {rerank_config.get('enabled')}")
     print(f"  - API URL: {rerank_config.get('api_url')}")
     print(f"  - API Key: {'***已配置***' if rerank_config.get('api_key') else '❌ 未配置'}")
@@ -50,7 +50,7 @@ def test_config_loading():
     
     # 测试 Redis 配置
     print("\n💾 Redis 配置:")
-    redis_config = config_manager.get_redis_config()
+    redis_config = config_manager.get_config('redis')
     print(f"  - Host: {redis_config.get('host')}")
     print(f"  - Port: {redis_config.get('port')}")
     print(f"  - Password: {'***' if redis_config.get('password') else '(未设置)'}")
@@ -58,7 +58,7 @@ def test_config_loading():
     
     # 测试爬虫配置
     print("\n🕷️ 爬虫配置:")
-    crawler_config = config_manager.get_crawler_config()
+    crawler_config = config_manager.get_config('crawler')
     print(f"  - Sitemap URL: {crawler_config.get('sitemap_url') or '(未配置)'}")
     print(f"  - Timeout: {crawler_config.get('timeout')}")
     print(f"  - Max URLs: {crawler_config.get('max_urls')}")
@@ -68,14 +68,14 @@ def test_config_loading():
     
     # 测试 Firecrawl 配置
     print("\n🔥 Firecrawl 配置:")
-    firecrawl_config = config_manager.get_firecrawl_config()
+    firecrawl_config = config_manager.get_config('firecrawl')
     print(f"  - Enabled: {firecrawl_config.get('enabled')}")
     print(f"  - API URL: {firecrawl_config.get('api_url')}")
     print(f"  - Timeout: {firecrawl_config.get('timeout')}")
     
     # 测试内容配置
     print("\n📄 内容处理配置:")
-    content_config = config_manager.get_content_config()
+    content_config = config_manager.get_config('content')
     print(f"  - Max Content Length Per Page: {content_config.get('max_content_length_per_page')}")
     
     # 测试点号路径访问

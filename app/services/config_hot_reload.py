@@ -53,10 +53,11 @@ class ConfigHotReloadManager:
                 logger.info("✅ LLM服务配置已更新")
 
                 # 验证配置
-                llm_config = config_manager.get_llm_config()
-                api_key = llm_config.get('openai_api_key', '')
-                api_base = llm_config.get('openai_api_base', '')
-                model = llm_config.get('model', '')
+                llm_config = config_manager.get_config('llm')
+                openai_config = llm_config.get('openai', {})
+                api_key = openai_config.get('api_key', '')
+                api_base = openai_config.get('api_base', '')
+                model = openai_config.get('model', '')
 
                 logger.info("当前配置:")
                 logger.info(f"  - API Base: {api_base or '默认'}")
@@ -92,7 +93,7 @@ class ConfigHotReloadManager:
                 logger.info("✅ Redis/向量服务配置已更新")
     
                 # 验证配置
-                redis_config = config_manager.get_redis_config()
+                redis_config = config_manager.get_config('redis')
                 redis_url = config_manager.get_redis_url()
                 logger.info(f"当前Redis URL: {redis_url}")
     
@@ -131,7 +132,7 @@ class ConfigHotReloadManager:
             config_manager.reload()
 
             # 验证配置
-            smtp_config = config_manager.get_smtp_config()
+            smtp_config = config_manager.get_config('smtp')
             smtp_server = smtp_config.get('server', '')
             smtp_port = smtp_config.get('port', '')
             smtp_user = smtp_config.get('user', '')
@@ -167,7 +168,7 @@ class ConfigHotReloadManager:
             config_manager.reload()
 
             # 验证配置
-            crawler_config = config_manager.get_crawler_config()
+            crawler_config = config_manager.get_config('crawler')
             sitemap_url = crawler_config.get('sitemap_url', '')
             timeout = crawler_config.get('timeout', '')
 

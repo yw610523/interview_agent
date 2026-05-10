@@ -68,8 +68,10 @@
             :pagination="true"
             :page-size="20"
             :show-permanent-delete="true"
+            :show-restore="true"
             @item-click="(index) => showQuestionDetail(index, 'hidden')"
             @permanent-delete="handlePermanentDelete"
+            @restore="handleRestoreQuestion"
           />
         </a-card>
       </a-col>
@@ -166,7 +168,7 @@ const showQuestionDetail = (index, listType = 'favorites') => {
   detailModalVisible.value = true
 }
 
-// 处理反馈变化（收藏/错题本）
+// 处理反馈变化（收藏/错题本/掌握程度/隐藏）
 const handleFeedbackChanged = async ({ questionId, type, value }) => {
   console.log('反馈变化:', { questionId, type, value })
   
@@ -188,6 +190,29 @@ const handleFeedbackChanged = async ({ questionId, type, value }) => {
       loadFavorites(),
       loadWrongBook()
     ])
+  }
+  
+  // 如果题目被隐藏（软删除），需要从所有列表中移除并重新加载
+  if (type === 'hidden' && value) {
+    console.log('题目已隐藏，刷新列表...')
+    await Promise.all([
+      loadFavorites(),
+      loadWrongBook(),
+      loadHiddenQuestions()
+    ])
+    message.success('题目已隐藏，30天后可恢复')
+    return
+  }
+  
+  // 如果掌握程度变为5（已掌握），题目会被软删除，需要从所有列表中移除并重新加载
+  if (type === 'mastery' && value === 5) {
+    console.log('题目已掌握，刷新列表...')
+    await Promise.all([
+      loadFavorites(),
+      loadWrongBook(),
+      loadHiddenQuestions()
+    ])
+    message.success('题目标记为已掌握，30天后可恢复')
   }
 }
 
@@ -231,6 +256,39 @@ const handlePermanentDelete = async (questionId) => {
           message.success('题目已永久删除')
         } catch (error) {
           message.error('删除失败')
+          console.error(error)
+        }
+      }
+    })
+  } catch (error) {
+    message.error('操作失败')
+    console.error(error)
+  }
+}
+
+// 恢夏题目（从软删除状态恢复）
+const handleRestoreQuestion = async (questionId) => {
+  try {
+    Modal.confirm({
+      title: '确认恢夏题目',
+      content: '该题目将重新出现在推荐列表中',
+      okText: '确认恢夏',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          // 将 hide_from_recommendation 设置为 false
+          await feedbackApi.submitFeedback(questionId, {
+            hideFromRecommendation: false
+          })
+          hiddenQuestions.value = hiddenQuestions.value.filter(q => q.id !== questionId)
+          message.success('题目已恢夏，将重新出现在推荐中')
+          // 重新加载收藏和错题本列表，因为题目可能在其中
+          await Promise.all([
+            loadFavorites(),
+            loadWrongBook()
+          ])
+        } catch (error) {
+          message.error('恢夏失败')
           console.error(error)
         }
       }
