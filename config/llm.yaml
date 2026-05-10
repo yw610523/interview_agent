@@ -57,7 +57,7 @@ embedding:
   # - text-embedding-3-small: 1536
   # - text-embedding-3-large: 3072
   # - bge-m3: 1024
-  dimension: ${EMBEDDING_DIMENSION:-1536}
+  dimension: ${EMBEDDING_DIMENSION:-1024}
 
 
 # ============================================================

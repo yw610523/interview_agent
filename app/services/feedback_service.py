@@ -468,8 +468,23 @@ class FeedbackService:
             }
 
             response = requests.post(rerank_url, json=payload, headers=headers, timeout=30)
-            response.raise_for_status()
-            result = response.json()
+            
+            # 检查 HTTP 状态码
+            if response.status_code != 200:
+                logger.error(f"Rerank API 返回错误状态码: {response.status_code}, 响应: {response.text[:200]}")
+                return questions[:top_k]
+            
+            # 检查响应内容是否为空
+            if not response.text or not response.text.strip():
+                logger.error(f"Rerank API 返回空响应, URL: {rerank_url}")
+                return questions[:top_k]
+            
+            # 尝试解析 JSON
+            try:
+                result = response.json()
+            except Exception as json_err:
+                logger.error(f"Rerank API 响应解析失败: {str(json_err)}, 响应内容: {response.text[:200]}")
+                return questions[:top_k]
 
             # 解析 Rerank 结果
             if 'results' in result and result['results']:
