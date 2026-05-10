@@ -62,8 +62,8 @@ class FirecrawlMCPService:
             api_key: Firecrawl API Key（官方 API 必须提供）
             timeout: 请求超时时间（秒）
         """
-        # 清理 URL 末尾的版本号后缀，统一由代码拼接
-        self.api_url = api_url.rstrip("/").replace("/v1", "").replace("/v2", "")
+        # 保留原始 URL，由 scrape_url/map_url 方法智能判断是否拼接
+        self.api_url = api_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
 
@@ -92,9 +92,12 @@ class FirecrawlMCPService:
             formats = ["markdown"]
 
         try:
-            # 构建 API 端点（默认使用 v1，可根据需要修改）
-            # 示例: https://api.firecrawl.dev/v1/scrape
-            endpoint = f"{self.api_url}/v1/scrape"
+            # 构建 API 端点
+            # 如果 api_url 已包含 /scrape，直接使用；否则自动拼接 /v1/scrape
+            if self.api_url.endswith('/scrape') or self.api_url.endswith('/v1/scrape') or self.api_url.endswith('/v2/scrape'):
+                endpoint = self.api_url
+            else:
+                endpoint = f"{self.api_url}/v1/scrape"
 
             # 构建请求 payload
             payload = {
@@ -183,7 +186,11 @@ class FirecrawlMCPService:
             包含 URLs 列表的字典
         """
         try:
-            endpoint = f"{self.api_url}/v1/map"
+            # 构建 API 端点
+            if self.api_url.endswith('/map') or self.api_url.endswith('/v1/map') or self.api_url.endswith('/v2/map'):
+                endpoint = self.api_url
+            else:
+                endpoint = f"{self.api_url}/v1/map"
 
             payload = {
                 "url": url,
