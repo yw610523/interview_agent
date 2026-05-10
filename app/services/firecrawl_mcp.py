@@ -95,8 +95,14 @@ class FirecrawlMCPService:
             formats = ["markdown"]
 
         try:
-            # 构建 API 端点：{api_url}/{api_version}/scrape
-            endpoint = f"{self.api_url}/{self.api_version}/scrape"
+            # 构建 API 端点
+            # 官方 API (api.firecrawl.dev) 需要版本号：{url}/{version}/scrape
+            # 自托管服务通常直接使用：{url}/scrape
+            if "api.firecrawl.dev" in self.api_url:
+                endpoint = f"{self.api_url}/{self.api_version}/scrape"
+            else:
+                # 自托管服务，直接拼接 /scrape
+                endpoint = f"{self.api_url}/scrape"
 
             # 构建请求 payload
             payload = {
@@ -185,7 +191,11 @@ class FirecrawlMCPService:
             包含 URLs 列表的字典
         """
         try:
-            endpoint = f"{self.api_url}/{self.api_version}/map"
+            # 构建 API 端点
+            if "api.firecrawl.dev" in self.api_url:
+                endpoint = f"{self.api_url}/{self.api_version}/map"
+            else:
+                endpoint = f"{self.api_url}/map"
 
             payload = {
                 "url": url,
