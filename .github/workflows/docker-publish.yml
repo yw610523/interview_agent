@@ -64,3 +64,10 @@ jobs:
       
       - name: Image digest
         run: echo ${{ steps.meta.outputs.digest }}
+      
+      - name: Trigger Jenkins Deployment
+        if: github.ref == 'refs/heads/main' && github.event.inputs.push_to_registry == 'true'
+        run: |
+          curl -X POST ${{ secrets.JENKINS_WEBHOOK_URL }} \
+            -H "Content-Type: application/json" \
+            -d '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'
