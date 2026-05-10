@@ -12,9 +12,14 @@ enabled: ${FIRECRAWL_ENABLED:-false}
 
 # Firecrawl API 地址（必填）：
 # - 自托管：http://localhost:3002
-# - 官方云基础 URL：https://api.firecrawl.dev（代码会自动拼接 /v1/scrape）
-# - 完整端点：https://api.firecrawl.dev/v2/scrape（直接使用，不拼接）
+# - 官方云：https://api.firecrawl.dev
+# 注意：不要加 /v1、/v2 或 /scrape，代码会自动拼接
 api_url: ${FIRECRAWL_API_URL:-}
+
+# API 版本：默认 v2
+# - 官方 API: v2
+# - 自托管可能使用: v1
+api_version: ${FIRECRAWL_API_VERSION:-v2}
 
 # API 密钥：认证令牌（自托管可留空，官方云必须提供）
 api_key: ${FIRECRAWL_API_KEY:-}

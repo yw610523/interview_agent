@@ -53,6 +53,7 @@ class FirecrawlMCPService:
         api_url: str = "http://firecrawl:3002",
         api_key: Optional[str] = None,
         timeout: int = 60,
+        api_version: str = "v2",
     ):
         """
         初始化 Firecrawl MCP 服务。
@@ -61,11 +62,13 @@ class FirecrawlMCPService:
             api_url: Firecrawl 服务地址（自托管或官方 API）
             api_key: Firecrawl API Key（官方 API 必须提供）
             timeout: 请求超时时间（秒）
+            api_version: API 版本号（默认 v2）
         """
-        # 保留原始 URL，由 scrape_url/map_url 方法智能判断是否拼接
+        # 清理 URL 末尾的斜杠
         self.api_url = api_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
+        self.api_version = api_version
 
     async def scrape_url(
         self,
@@ -92,12 +95,8 @@ class FirecrawlMCPService:
             formats = ["markdown"]
 
         try:
-            # 构建 API 端点
-            # 如果 api_url 已包含 /scrape，直接使用；否则自动拼接 /v1/scrape
-            if self.api_url.endswith('/scrape') or self.api_url.endswith('/v1/scrape') or self.api_url.endswith('/v2/scrape'):
-                endpoint = self.api_url
-            else:
-                endpoint = f"{self.api_url}/v1/scrape"
+            # 构建 API 端点：{api_url}/{api_version}/scrape
+            endpoint = f"{self.api_url}/{self.api_version}/scrape"
 
             # 构建请求 payload
             payload = {
@@ -186,11 +185,7 @@ class FirecrawlMCPService:
             包含 URLs 列表的字典
         """
         try:
-            # 构建 API 端点
-            if self.api_url.endswith('/map') or self.api_url.endswith('/v1/map') or self.api_url.endswith('/v2/map'):
-                endpoint = self.api_url
-            else:
-                endpoint = f"{self.api_url}/v1/map"
+            endpoint = f"{self.api_url}/{self.api_version}/map"
 
             payload = {
                 "url": url,
@@ -241,6 +236,7 @@ class FirecrawlMCPService:
                 - firecrawl_api_url: API URL（必填）
                 - firecrawl_api_key: API Key（可选）
                 - firecrawl_timeout: 超时时间
+                - firecrawl_api_version: API 版本（默认 v2）
 
         返回:
             FirecrawlMCPService 实例
@@ -249,4 +245,5 @@ class FirecrawlMCPService:
             api_url=config.get("firecrawl_api_url", "http://firecrawl:3002"),
             api_key=config.get("firecrawl_api_key"),
             timeout=config.get("firecrawl_timeout", 60),
+            api_version=config.get("firecrawl_api_version", "v2"),
         )

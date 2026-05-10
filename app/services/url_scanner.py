@@ -83,7 +83,7 @@ class URLScanner:
             firecrawl_api_url: str = "http://localhost:3002",
             firecrawl_api_key: Optional[str] = None,
             firecrawl_timeout: int = 60,
-            firecrawl_use_official: bool = False,
+            firecrawl_api_version: str = "v2",
             firecrawl_only_main_content: bool = True,
     ):
         """
@@ -98,7 +98,7 @@ class URLScanner:
             firecrawl_api_url: Firecrawl API URL
             firecrawl_api_key: Firecrawl API Key
             firecrawl_timeout: Firecrawl 超时时间
-            firecrawl_use_official: 是否使用官方 Firecrawl API
+            firecrawl_api_version: Firecrawl API 版本（默认 v2）
             firecrawl_only_main_content: 是否只提取主要内容
         """
         self.timeout = timeout
@@ -109,7 +109,7 @@ class URLScanner:
         self.firecrawl_api_url = firecrawl_api_url
         self.firecrawl_api_key = firecrawl_api_key
         self.firecrawl_timeout = firecrawl_timeout
-        self.firecrawl_use_official = firecrawl_use_official
+        self.firecrawl_api_version = firecrawl_api_version
         self.firecrawl_only_main_content = firecrawl_only_main_content
         self._session = requests.Session()
         self._session.headers.update(self.DEFAULT_HEADERS)
@@ -388,7 +388,7 @@ class URLScanner:
             api_url=self.firecrawl_api_url,
             api_key=self.firecrawl_api_key,
             timeout=self.firecrawl_timeout,
-            use_official_api=self.firecrawl_use_official,
+            api_version=self.firecrawl_api_version,
         )
 
         # 定义异步爬取函数
