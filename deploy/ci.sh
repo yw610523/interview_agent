@@ -157,42 +157,22 @@ start_new_containers() {
     
     # 生成临时 .env 文件，将 Jenkins 环境变量传递给 Docker Compose
     local env_file="${SCRIPT_DIR}/.env.tmp"
-    cat > "$env_file" <<EOF
+    
+    # 方法：从当前环境中提取所有大写开头的变量（Jenkins 参数通常为大写）
+    # 排除系统变量，只保留项目相关的环境变量
+    cat > "$env_file" <<'HEADER'
 # 自动生成的环境变量（Jenkins 传入）
-REDIS_HOST=${REDIS_HOST:-redis}
-REDIS_PORT=${REDIS_PORT:-6379}
-REDIS_PASSWORD=${REDIS_PASSWORD:-}
-APP_PORT=${APP_PORT:-9023}
-
-# Firecrawl 配置
-FIRECRAWL_ENABLED=${FIRECRAWL_ENABLED:-false}
-FIRECRAWL_API_URL=${FIRECRAWL_API_URL:-}
-FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY:-}
-FIRECRAWL_TIMEOUT=${FIRECRAWL_TIMEOUT:-60}
-USE_OFFICIAL_FIRECRAWL=${USE_OFFICIAL_FIRECRAWL:-false}
-FIRECRAWL_ONLY_MAIN_CONTENT=${FIRECRAWL_ONLY_MAIN_CONTENT:-true}
-
-# LLM 配置
-OPENAI_API_KEY=${OPENAI_API_KEY:-}
-OPENAI_API_BASE=${OPENAI_API_BASE:-}
-OPENAI_MODEL=${OPENAI_MODEL:-}
-EMBEDDING_API_BASE=${EMBEDDING_API_BASE:-}
-EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-}
-EMBEDDING_MODEL=${EMBEDDING_MODEL:-}
-EMBEDDING_DIMENSION=${EMBEDDING_DIMENSION:-1024}
-RERANK_ENABLED=${RERANK_ENABLED:-true}
-RERANK_API_BASE=${RERANK_API_BASE:-}
-RERANK_API_KEY=${RERANK_API_KEY:-}
-RERANK_MODEL=${RERANK_MODEL:-}
-
-# SMTP 配置
-SMTP_SERVER=${SMTP_SERVER:-}
-SMTP_PORT=${SMTP_PORT:-587}
-SMTP_USER=${SMTP_USER:-}
-SMTP_PASSWORD=${SMTP_PASSWORD:-}
-EOF
+# 由 ci.sh 在部署时动态生成
+HEADER
+    
+    # 导出所有 Jenkins 传入的环境变量到 .env 文件
+    # 过滤规则：变量名全为大写字母、数字、下划线，且不为空
+    env | grep -E '^[A-Z_][A-Z0-9_]*=' | \
+        grep -vE '^(PATH|HOME|USER|SHELL|TERM|LANG|LC_|HOSTNAME|PWD|OLDPWD|SHLVL|_)=' | \
+        sort >> "$env_file"
     
     log_info "✅ 已生成临时环境变量文件: $env_file"
+    log_info "   包含 $(wc -l < "$env_file") 个环境变量"
     
     # 使用 --env-file 传递环境变量
     docker compose -f "${SCRIPT_DIR}/$COMPOSE_FILE" --env-file "$env_file" up -d
