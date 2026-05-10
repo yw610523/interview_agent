@@ -206,18 +206,24 @@ class ConfigManager:
         return merged_config
 
     def _load_yaml_defaults(self):
-        """加载 YAML 默认配置并解析环境变量"""
-        self._yaml_defaults = self._load_config()
-        self._yaml_defaults = self._resolve_env_variables(self._yaml_defaults)
+        """
+        加载 YAML 默认配置并解析环境变量
+        
+        注意：保存原始配置（未解析）用于检测环境变量变化
+        """
+        raw_config = self._load_config()
+        self._raw_yaml_config = raw_config.copy()  # 保存原始配置
+        self._yaml_defaults = self._resolve_env_variables(raw_config)
         logger.info("YAML 默认配置加载完成")
 
     def _sync_defaults_to_redis(self):
         """
         将 YAML 默认配置同步到 Redis
-        只有 Redis 中没有的模块才会同步
         
-        注意：对于包含环境变量的配置，每次都重新解析并更新
-        排除 redis 模块，避免循环依赖问题
+        策略：
+        1. 如果原始 YAML 包含环境变量占位符，每次都重新同步（确保使用最新的环境变量值）
+        2. 如果 Redis 中没有该模块的配置，则同步
+        3. 排除 redis 模块，避免循环依赖问题
         """
         if not self.redis_client:
             return
@@ -235,14 +241,16 @@ class ConfigManager:
             redis_key = f"{self._redis_prefix}{module_name}"
             existing = self.redis_client.get(redis_key)
             
-            # 检查配置中是否包含环境变量占位符
-            has_env_vars = self._has_env_variables(module_config)
+            # 检查原始 YAML 配置中是否包含环境变量占位符
+            raw_config = self._raw_yaml_config.get(module_name, {})
+            has_env_vars = self._has_env_variables(raw_config)
             
             if existing is None or has_env_vars:
-                # Redis 中没有，或包含环境变量需要重新解析，则同步
+                # Redis 中没有，或原始配置包含环境变量需要重新解析，则同步
                 self.redis_client.set(redis_key, json.dumps(module_config, ensure_ascii=False))
                 synced_count += 1
-                logger.debug(f"同步配置到 Redis: {module_name} (env_vars={has_env_vars})")
+                action = "新增" if existing is None else "更新（环境变量变化）"
+                logger.debug(f"同步配置到 Redis: {module_name} ({action}, env_vars={has_env_vars})")
 
         if synced_count > 0:
             logger.info(f"已将 {synced_count} 个模块的配置同步到 Redis")
