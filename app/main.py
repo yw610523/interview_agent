@@ -1324,6 +1324,40 @@ async def permanently_delete_question(question_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.delete("/api/questions/{question_id}/permanent", summary="直接从向量库永久删除题目")
+async def direct_permanent_delete(question_id: str):
+    """
+    直接从向量数据库中永久删除题目（不经过反馈系统）
+    用于标记“非问题”的场景
+    """
+    try:
+        # 直接从向量数据库中删除
+        success = await run_sync(vector_service.delete_by_id, question_id)
+
+        if not success:
+            raise HTTPException(status_code=404, detail="题目不存在")
+
+        # 同时清理反馈数据（如果存在）
+        try:
+            key = feedback_service._get_feedback_key(question_id)
+            if feedback_service.redis_client:
+                feedback_service.redis_client.delete(key)
+        except Exception:
+            pass  # 反馈数据不存在不影响主流程
+
+        logger.info(f"直接永久删除题目: {question_id}")
+        return {
+            "status": "success",
+            "message": "题目已永久删除"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Direct permanent delete error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/system/weights/update", summary="手动更新权重")
 async def update_weights():
     """

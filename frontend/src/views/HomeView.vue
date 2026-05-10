@@ -26,7 +26,9 @@
       <QuestionList
         :questions="displayQuestions"
         :pagination="false"
+        :show-not-question="true"
         @item-click="showQuestionDetail"
+        @not-question="handleNotQuestion"
       />
     </div>
 
@@ -252,6 +254,26 @@ const handleFeedbackChanged = async ({ questionId, type, value }) => {
     } else if (type === 'wrong_book') {
       question.is_wrong_book = value
     }
+  }
+}
+
+// 处理“非问题”标记（永久删除）
+const handleNotQuestion = async (questionId) => {
+  try {
+    await questionApi.permanentlyDeleteQuestion(questionId)
+    message.success('题目已永久删除')
+    
+    // 从当前列表中移除
+    if (hasSearched.value) {
+      // 搜索模式：从 searchResults 中移除
+      searchResults.value = searchResults.value.filter(q => q.id !== questionId)
+    } else {
+      // 推荐模式：从 recommendedQuestions 中移除
+      recommendedQuestions.value = recommendedQuestions.value.filter(q => q.id !== questionId)
+    }
+  } catch (error) {
+    message.error('删除失败')
+    console.error(error)
   }
 }
 

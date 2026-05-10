@@ -151,6 +151,11 @@ export const questionApi = {
     return apiClient.delete(`/questions/${questionId}`)
   },
 
+  // 永久删除题目（直接从向量库删除）
+  permanentlyDeleteQuestion(questionId) {
+    return apiClient.delete(`/questions/${questionId}/permanent`)
+  },
+
   // 智能推荐题目
   getRecommendedQuestions(limit = 20, excludeMastered = true, useRerank = false) {
     return apiClient.get(`/questions/recommended?limit=${limit}&exclude_mastered=${excludeMastered}&use_rerank=${useRerank}`)
