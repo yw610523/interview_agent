@@ -14,17 +14,15 @@ class FirecrawlConfig:
     
     属性:
         enabled: 是否启用 Firecrawl
-        api_url: Firecrawl API 地址
+        api_url: Firecrawl API 地址（必填）
         api_key: Firecrawl API 密钥（可选）
         timeout: 请求超时时间（秒）
-        use_official: 是否使用官方 API
         only_main_content: 是否只提取主要内容
     """
     enabled: bool = False
     api_url: str = "http://localhost:3002"
     api_key: Optional[str] = None
     timeout: int = 600
-    use_official: bool = False
     only_main_content: bool = True
     
     def to_dict(self) -> Dict[str, Any]:

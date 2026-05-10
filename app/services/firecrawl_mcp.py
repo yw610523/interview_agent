@@ -53,30 +53,19 @@ class FirecrawlMCPService:
         api_url: str = "http://firecrawl:3002",
         api_key: Optional[str] = None,
         timeout: int = 60,
-        use_official_api: bool = False,
     ):
         """
         初始化 Firecrawl MCP 服务。
 
         参数:
-            api_url: Firecrawl 服务地址（自托管）或官方 API 地址
-            api_key: Firecrawl API Key（使用官方 API 时必须）
+            api_url: Firecrawl 服务地址（自托管或官方 API）
+            api_key: Firecrawl API Key（官方 API 必须提供）
             timeout: 请求超时时间（秒）
-            use_official_api: 是否使用官方 API（默认使用自托管）
         """
-        self.api_url = api_url.rstrip("/")
+        # 清理 URL 末尾的版本号后缀，统一由代码拼接
+        self.api_url = api_url.rstrip("/").replace("/v1", "").replace("/v2", "")
         self.api_key = api_key
         self.timeout = timeout
-        self.use_official_api = use_official_api
-
-        # 如果是官方 API，使用官方端点
-        if use_official_api:
-            # 如果 api_url 未配置或不是 http 开头，使用默认官方地址（v2）
-            if not api_url or not api_url.startswith("http"):
-                self.api_url = "https://api.firecrawl.dev"
-            else:
-                # 移除末尾可能存在的版本号后缀，统一使用 v2
-                self.api_url = api_url.rstrip("/").replace("/v1", "").replace("/v2", "")
 
     async def scrape_url(
         self,
@@ -103,11 +92,9 @@ class FirecrawlMCPService:
             formats = ["markdown"]
 
         try:
-            # 构建 API 端点
-            # 官方 API v2: https://api.firecrawl.dev/v2/scrape
-            # 自托管服务: http://your-server:3002/v1/scrape (可能仍使用 v1)
-            api_version = "v2" if self.use_official_api else "v1"
-            endpoint = f"{self.api_url}/{api_version}/scrape"
+            # 构建 API 端点（默认使用 v1，可根据需要修改）
+            # 示例: https://api.firecrawl.dev/v1/scrape
+            endpoint = f"{self.api_url}/v1/scrape"
 
             # 构建请求 payload
             payload = {
@@ -196,8 +183,7 @@ class FirecrawlMCPService:
             包含 URLs 列表的字典
         """
         try:
-            api_version = "v2" if self.use_official_api else "v1"
-            endpoint = f"{self.api_url}/{api_version}/map"
+            endpoint = f"{self.api_url}/v1/map"
 
             payload = {
                 "url": url,
@@ -245,10 +231,9 @@ class FirecrawlMCPService:
 
         参数:
             config: 配置字典，包含以下键：
-                - firecrawl_api_url: API URL
+                - firecrawl_api_url: API URL（必填）
                 - firecrawl_api_key: API Key（可选）
                 - firecrawl_timeout: 超时时间
-                - firecrawl_use_official: 是否使用官方 API
 
         返回:
             FirecrawlMCPService 实例
@@ -257,5 +242,4 @@ class FirecrawlMCPService:
             api_url=config.get("firecrawl_api_url", "http://firecrawl:3002"),
             api_key=config.get("firecrawl_api_key"),
             timeout=config.get("firecrawl_timeout", 60),
-            use_official_api=config.get("firecrawl_use_official", False),
         )
