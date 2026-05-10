@@ -40,7 +40,7 @@ services:
       - ../config/smtp.yaml:/app/config/smtp.yaml:ro
       - ../config/redis.yaml:/app/config/redis.yaml:ro
       - ../config/firecrawl.yaml:/app/config/firecrawl.yaml:ro
-      - ../config/rerank.yaml:/app/config/rerank.yaml:ro
+      # 注意：rerank 配置已整合到 llm.yaml 中，无需单独挂载
       - ../config/content.yaml:/app/config/content.yaml:ro
       - ../config/prompts.yaml:/app/config/prompts.yaml:ro
       - ../config/service.yaml:/app/config/service.yaml:ro
