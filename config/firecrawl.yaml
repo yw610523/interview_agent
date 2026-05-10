@@ -12,7 +12,7 @@ enabled: ${FIRECRAWL_ENABLED:-false}
 
 # Firecrawl API 地址：
 # - 自托管：http://localhost:3002 或 http://host.docker.internal:3002
-# - 官方云：https://api.firecrawl.dev
+# - 官方云：https://api.firecrawl.dev（不需要加 /v1 或 /v2，代码会自动拼接）
 api_url: ${FIRECRAWL_API_URL:-}
 
 # API 密钥：认证令牌（自托管可留空，官方云必须提供）
