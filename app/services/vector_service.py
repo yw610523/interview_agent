@@ -281,7 +281,7 @@ class VectorService:
             # 检查是否存在相似问题（使用标题+答案的组合提高准确性）
             if check_similarity:
                 search_text = question.title + " " + question.answer[:200]  # 使用前200字符的答案
-                similar_question = self._find_most_similar_question(search_text, similarity_threshold)
+                similar_question = self.find_similar_question(search_text, similarity_threshold)
                 if similar_question:
                     logger.info(
                         f"发现相似问题: {question.title} -> "
@@ -289,7 +289,7 @@ class VectorService:
                         f"(相似度: {similar_question['score']:.2f})"
                     )
                     # 合并问题而不是插入新的
-                    return self._merge_into_existing_question(similar_question['id'], question)
+                    return self.merge_into_existing_question(similar_question['id'], question)
 
             # 存储到 Redis
             key = f"question:{question.id}"
@@ -873,3 +873,111 @@ class VectorService:
 
         logger.info(f"混合搜索合并结果: {len(final_results)} 个 (精确:{len(exact_results)}, 语义:{len(semantic_results)})")
         return final_results
+
+    def find_similar_question(
+        self,
+        text: str,
+        threshold: float = 0.85
+    ) -> Optional[Dict[str, Any]]:
+        """
+        查找相似问题
+        
+        参数:
+            text: 搜索文本（标题+答案）
+            threshold: 相似度阈值（0-1）
+            
+        返回:
+            最相似的问题，如果相似度低于阈值则返回 None
+        """
+        try:
+            # 使用语义搜索查找相似问题
+            results = self.search(text, limit=1)
+            
+            if not results:
+                return None
+            
+            # 检查相似度是否达到阈值
+            best_match = results[0]
+            score = best_match.get('score', 0.0)
+            
+            # RediSearch KNN 返回的是距离，需要转换为相似度
+            # COSINE 距离范围 [0, 2]，相似度 = 1 - distance/2
+            similarity = 1.0 - (score / 2.0)
+            
+            if similarity >= threshold:
+                best_match['score'] = similarity
+                return best_match
+            else:
+                logger.debug(f"最高相似度 {similarity:.2f} 低于阈值 {threshold}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"查找相似问题失败: {str(e)}")
+            return None
+    
+    def merge_into_existing_question(
+        self,
+        existing_id: str,
+        new_question: VectorRecord
+    ) -> bool:
+        """
+        将新问题合并到已存在的问题中
+        
+        策略：
+        1. 保留原有问题的 ID、向量、重要性等核心信息
+        2. 合并来源 URL（用分号分隔）
+        3. 合并标签（去重）
+        4. 更新答案（如果新问题答案更长）
+        
+        参数:
+            existing_id: 已存在问题的 ID
+            new_question: 新问题
+            
+        返回:
+            是否成功
+        """
+        try:
+            # 获取已存在的问题
+            existing_key = f"question:{existing_id}"
+            existing_data = self.redis_client.hgetall(existing_key)
+            
+            if not existing_data:
+                logger.warning(f"已存在的问题不存在: {existing_id}")
+                return False
+            
+            # 合并来源 URL
+            existing_url = existing_data.get(b'source_url', b'').decode()
+            new_url = new_question.source_url
+            
+            if existing_url and new_url and new_url not in existing_url:
+                merged_url = f"{existing_url};{new_url}"
+            elif new_url:
+                merged_url = new_url
+            else:
+                merged_url = existing_url
+            
+            # 合并标签
+            existing_tags = existing_data.get(b'tags', b'').decode().split(',') if existing_data.get(b'tags') else []
+            new_tags = new_question.tags
+            merged_tags = list(set(existing_tags + new_tags))  # 去重
+            
+            # 选择更长的答案
+            existing_answer = existing_data.get(b'answer', b'').decode()
+            if len(new_question.answer) > len(existing_answer):
+                final_answer = new_question.answer
+            else:
+                final_answer = existing_answer
+            
+            # 更新 Redis
+            self.redis_client.hset(existing_key, mapping={
+                'source_url': merged_url,
+                'tags': ','.join(merged_tags),
+                'answer': final_answer,
+            })
+            
+            logger.info(f"问题合并成功: {new_question.title} -> {existing_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"合并问题失败: {str(e)}")
+            return False
