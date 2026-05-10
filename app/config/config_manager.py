@@ -140,6 +140,16 @@ class ConfigManager:
             pass
         return value
 
+    def _has_env_variables(self, config: Any) -> bool:
+        """递归检查配置中是否包含环境变量占位符"""
+        if isinstance(config, dict):
+            return any(self._has_env_variables(v) for v in config.values())
+        elif isinstance(config, list):
+            return any(self._has_env_variables(item) for item in config)
+        elif isinstance(config, str):
+            return '${' in config
+        return False
+
     def _load_config(self) -> Dict[str, Any]:
         """从配置文件目录加载配置"""
         if self._config_dir_override:
@@ -199,6 +209,8 @@ class ConfigManager:
         """
         将 YAML 默认配置同步到 Redis
         只有 Redis 中没有的模块才会同步
+        
+        注意：对于包含环境变量的配置，每次都重新解析并更新
         """
         if not self.redis_client:
             return
@@ -207,14 +219,18 @@ class ConfigManager:
         for module_name, module_config in self._yaml_defaults.items():
             redis_key = f"{self._redis_prefix}{module_name}"
             existing = self.redis_client.get(redis_key)
-            if existing is None:
-                # Redis 中没有，同步 YAML 默认配置
+            
+            # 检查配置中是否包含环境变量占位符
+            has_env_vars = self._has_env_variables(module_config)
+            
+            if existing is None or has_env_vars:
+                # Redis 中没有，或包含环境变量需要重新解析，则同步
                 self.redis_client.set(redis_key, json.dumps(module_config, ensure_ascii=False))
                 synced_count += 1
-                logger.debug(f"同步默认配置到 Redis: {module_name}")
+                logger.debug(f"同步配置到 Redis: {module_name} (env_vars={has_env_vars})")
 
         if synced_count > 0:
-            logger.info(f"已将 {synced_count} 个模块的默认配置同步到 Redis")
+            logger.info(f"已将 {synced_count} 个模块的配置同步到 Redis")
 
     def _get_from_redis(self, module_name: str) -> Optional[Dict[str, Any]]:
         """从 Redis 获取配置"""
