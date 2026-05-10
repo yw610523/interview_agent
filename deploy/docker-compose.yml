@@ -23,9 +23,9 @@ services:
     env_file:
       - .env
     environment:
-      # 重要：容器内部始终使用 Redis 的内部端口 6379
-      # REDIS_PORT 从 .env 文件读取的是外部端口，需要覆盖为内部端口
-      - REDIS_PORT=6379
+      # 容器内部配置：使用 Docker 网络通信
+      - REDIS_HOST=redis          # Redis 容器名
+      - REDIS_PORT=6379           # Redis 内部端口（固定）
     ports:
       - "${APP_PORT:-9023}:9023"  # 前端访问端口
     depends_on:
