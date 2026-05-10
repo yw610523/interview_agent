@@ -154,7 +154,51 @@ stop_old_containers() {
 # 步骤 5: 启动新容器
 start_new_containers() {
     log_info "步骤 5: 启动新容器..."
-    docker compose -f "${SCRIPT_DIR}/$COMPOSE_FILE" up -d
+    
+    # 生成临时 .env 文件，将 Jenkins 环境变量传递给 Docker Compose
+    local env_file="${SCRIPT_DIR}/.env.tmp"
+    cat > "$env_file" <<EOF
+# 自动生成的环境变量（Jenkins 传入）
+REDIS_HOST=${REDIS_HOST:-redis}
+REDIS_PORT=${REDIS_PORT:-6379}
+REDIS_PASSWORD=${REDIS_PASSWORD:-}
+APP_PORT=${APP_PORT:-9023}
+
+# Firecrawl 配置
+FIRECRAWL_ENABLED=${FIRECRAWL_ENABLED:-false}
+FIRECRAWL_API_URL=${FIRECRAWL_API_URL:-}
+FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY:-}
+FIRECRAWL_TIMEOUT=${FIRECRAWL_TIMEOUT:-60}
+USE_OFFICIAL_FIRECRAWL=${USE_OFFICIAL_FIRECRAWL:-false}
+FIRECRAWL_ONLY_MAIN_CONTENT=${FIRECRAWL_ONLY_MAIN_CONTENT:-true}
+
+# LLM 配置
+OPENAI_API_KEY=${OPENAI_API_KEY:-}
+OPENAI_API_BASE=${OPENAI_API_BASE:-}
+OPENAI_MODEL=${OPENAI_MODEL:-}
+EMBEDDING_API_BASE=${EMBEDDING_API_BASE:-}
+EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-}
+EMBEDDING_MODEL=${EMBEDDING_MODEL:-}
+EMBEDDING_DIMENSION=${EMBEDDING_DIMENSION:-1024}
+RERANK_ENABLED=${RERANK_ENABLED:-true}
+RERANK_API_BASE=${RERANK_API_BASE:-}
+RERANK_API_KEY=${RERANK_API_KEY:-}
+RERANK_MODEL=${RERANK_MODEL:-}
+
+# SMTP 配置
+SMTP_SERVER=${SMTP_SERVER:-}
+SMTP_PORT=${SMTP_PORT:-587}
+SMTP_USER=${SMTP_USER:-}
+SMTP_PASSWORD=${SMTP_PASSWORD:-}
+EOF
+    
+    log_info "✅ 已生成临时环境变量文件: $env_file"
+    
+    # 使用 --env-file 传递环境变量
+    docker compose -f "${SCRIPT_DIR}/$COMPOSE_FILE" --env-file "$env_file" up -d
+    
+    # 清理临时文件
+    rm -f "$env_file"
     
     if [ $? -eq 0 ]; then
         log_info "✅ 容器启动成功"
