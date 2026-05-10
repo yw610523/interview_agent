@@ -1587,7 +1587,7 @@ async def crawl_single_page(url: str):
         start_time = time.time()
         logger.info(f"开始爬取单个页面: {url}")
 
-        # 1. 扫描页面
+        # 1. 扫描页面（异步执行，不阻塞事件循环）
         logger.info("步骤1: 正在扫描页面...")
 
         # 从配置中读取 Firecrawl 设置
@@ -1605,10 +1605,10 @@ async def crawl_single_page(url: str):
             firecrawl_api_url=firecrawl_config_dict.get('api_url', ''),
             firecrawl_api_key=firecrawl_config_dict.get('api_key', ''),
             firecrawl_timeout=firecrawl_config_dict.get('timeout', 300),
-            firecrawl_use_official=firecrawl_config_dict.get('use_official', False),
+            firecrawl_api_version=firecrawl_config_dict.get('api_version', 'v2'),
             firecrawl_only_main_content=firecrawl_config_dict.get('only_main_content', True),
         )
-        scan_result = scanner.scan(url)
+        scan_result = await run_sync(scanner.scan, url)
 
         if scan_result.error:
             raise HTTPException(status_code=400, detail=f"页面扫描失败: {scan_result.error}")
@@ -1746,7 +1746,7 @@ async def crawl_single_page_stream(url: str):
                         firecrawl_api_url=firecrawl_config_dict.get('api_url', ''),
                         firecrawl_api_key=firecrawl_config_dict.get('api_key', ''),
                         firecrawl_timeout=firecrawl_config_dict.get('timeout', 300),
-                        firecrawl_use_official=firecrawl_config_dict.get('use_official', False),
+                        firecrawl_api_version=firecrawl_config_dict.get('api_version', 'v2'),
                         firecrawl_only_main_content=firecrawl_config_dict.get('only_main_content', True),
                     )
                     scan_result = scanner.scan(url)
