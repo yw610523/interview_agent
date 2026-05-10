@@ -211,12 +211,21 @@ class ConfigManager:
         只有 Redis 中没有的模块才会同步
         
         注意：对于包含环境变量的配置，每次都重新解析并更新
+        排除 redis 模块，避免循环依赖问题
         """
         if not self.redis_client:
             return
 
+        # 排除的模块列表（不能存储到 Redis 中）
+        excluded_modules = {'redis'}
+
         synced_count = 0
         for module_name, module_config in self._yaml_defaults.items():
+            # 跳过排除的模块
+            if module_name in excluded_modules:
+                logger.debug(f"跳过同步 {module_name} 配置到 Redis（避免循环依赖）")
+                continue
+            
             redis_key = f"{self._redis_prefix}{module_name}"
             existing = self.redis_client.get(redis_key)
             
@@ -338,7 +347,15 @@ class ConfigManager:
             module_name: 配置模块名称
             config_data: 配置数据
             persist_to_file: 是否同时持久化到文件（默认 False）
+        
+        注意：redis 模块不能保存到 Redis，避免循环依赖
         """
+        # 排除 redis 模块
+        if module_name == 'redis':
+            logger.warning("无法保存 redis 配置到 Redis（避免循环依赖），已保存到内存")
+            self._yaml_defaults['redis'] = config_data
+            return True
+        
         # 保存到 Redis
         success = self._save_to_redis(module_name, config_data)
         
@@ -387,10 +404,13 @@ class ConfigManager:
 
     @property
     def all_config(self) -> Dict[str, Any]:
-        """获取所有配置（从 Redis）"""
+        """获取所有配置（从 Redis，排除 redis 模块）"""
         result = {}
         if self.redis_client:
             for module_name in self._yaml_defaults.keys():
+                # 排除 redis 模块
+                if module_name == 'redis':
+                    continue
                 redis_key = f"{self._redis_prefix}{module_name}"
                 data = self.redis_client.get(redis_key)
                 if data:
