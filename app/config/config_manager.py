@@ -273,16 +273,29 @@ class ConfigManager:
         return True
 
     def get(self, key_path: str, default: Any = None) -> Any:
-        """通过点号分隔的路径获取配置值（优先 Redis）"""
+        """
+        通过点号分隔的路径获取配置值
+        
+        注意：redis 模块直接从 YAML/内存读取，避免循环依赖
+        其他模块优先从 Redis 读取
+        
+        示例:
+            config_manager.get('redis.host')  # 从 YAML 读取
+            config_manager.get('llm.model')   # 从 Redis 读取
+        """
         keys = key_path.split('.')
         module_name = keys[0]
         
-        # 优先从 Redis 获取
-        module_config = self._get_from_redis(module_name)
-        
-        # Redis 为空则使用 YAML 默认值
-        if module_config is None:
-            module_config = self._yaml_defaults.get(module_name, {})
+        # redis 模块特殊处理：直接从内存读取
+        if module_name == 'redis':
+            module_config = self._yaml_defaults.get('redis', {})
+        else:
+            # 其他模块：优先从 Redis 获取
+            module_config = self._get_from_redis(module_name)
+            
+            # Redis 为空则使用 YAML 默认值
+            if module_config is None:
+                module_config = self._yaml_defaults.get(module_name, {})
         
         # 嵌套路径查找
         value = module_config
@@ -297,8 +310,17 @@ class ConfigManager:
         return value if value is not None else default
 
     def get_config(self, module_name: str) -> Dict[str, Any]:
-        """获取指定模块的完整配置（优先 Redis，回退 YAML）"""
-        # 优先从 Redis 获取
+        """
+        获取指定模块的完整配置
+        
+        注意：redis 模块直接从 YAML/内存读取，避免循环依赖
+        其他模块优先从 Redis 读取，回退到 YAML
+        """
+        # redis 模块特殊处理：直接从内存读取（来自 YAML）
+        if module_name == 'redis':
+            return self._yaml_defaults.get('redis', {})
+        
+        # 其他模块：优先从 Redis 获取
         redis_config = self._get_from_redis(module_name)
         if redis_config is not None:
             return redis_config
