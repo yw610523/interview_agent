@@ -20,6 +20,8 @@ services:
   app:
     image: ghcr.io/yw610523/interview_agent:latest
     container_name: interview-agent
+    env_file:
+      - .env
     ports:
       - "${APP_PORT:-9023}:9023"  # 前端访问端口
     depends_on:
