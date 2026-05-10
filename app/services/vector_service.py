@@ -82,9 +82,11 @@ class VectorService:
         # 优先使用独立的 Embedding 配置，兼容 LLM 配置和环境变量
         api_key = config_manager.get('llm.embedding.api_key') or \
                   config_manager.get('llm.openai.api_key') or \
+                  os.getenv("EMBEDDING_API_KEY") or \
                   os.getenv("OPENAI_API_KEY")
         api_base = config_manager.get('llm.embedding.api_base') or \
                    config_manager.get('llm.openai.api_base') or \
+                   os.getenv("EMBEDDING_API_BASE") or \
                    os.getenv("OPENAI_API_BASE")
 
         if api_key and OPENAI_AVAILABLE:
