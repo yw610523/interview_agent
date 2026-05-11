@@ -105,14 +105,26 @@ class VectorService:
             return self._simple_hash_embedding(text)
 
         try:
-            # 优先从 config.yaml 读取 Embedding 模型名称
+            # 优先从 config.yaml 读取 Embedding 模型名称和维度
             embedding_model = config_manager.get('llm.embedding.model') or \
                              config_manager.get('llm.embedding_model') or \
-                             os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-            response = self.openai_client.embeddings.create(
-                input=text,
-                model=embedding_model,
-            )
+                             os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+            embedding_dim = config_manager.get('llm.embedding.dimension') or \
+                           config_manager.get('llm.embedding_dimension') or \
+                           int(os.getenv("EMBEDDING_DIMENSION", "1024"))
+            
+            # 构建请求参数
+            request_params = {
+                "input": text,
+                "model": embedding_model,
+            }
+            
+            # 对于支持动态维度的模型（如 OpenAI text-embedding-3系列），传入 dimensions 参数
+            # BAAI/bge-m3 等固定维度模型会忽略此参数
+            if "text-embedding-3" in embedding_model:
+                request_params["dimensions"] = embedding_dim
+            
+            response = self.openai_client.embeddings.create(**request_params)
 
             # 检查响应类型，确保不是字符串
             if isinstance(response, str):
@@ -130,7 +142,17 @@ class VectorService:
                 logger.error(f"Embedding API 响应数据格式异常: {response.data}")
                 raise Exception("Embedding API 响应数据格式异常")
 
-            return response.data[0].embedding
+            embedding = response.data[0].embedding
+            
+            # 验证向量维度是否与配置一致
+            actual_dim = len(embedding)
+            if actual_dim != embedding_dim:
+                logger.warning(
+                    f"向量维度不匹配: 模型 '{embedding_model}' 返回 {actual_dim} 维，"
+                    f"但配置为 {embedding_dim} 维。这可能导致搜索失败。"
+                )
+            
+            return embedding
         except Exception as e:
             error_msg = str(e)
             logger.error(f"生成 Embedding 失败: {error_msg}")
@@ -214,7 +236,7 @@ class VectorService:
                 # 优先从 config.yaml 读取，兼容环境变量
                 embedding_dim = config_manager.get('llm.embedding.dimension') or \
                                config_manager.get('llm.embedding_dimension') or \
-                               int(os.getenv("EMBEDDING_DIMENSION", "1536"))
+                               int(os.getenv("EMBEDDING_DIMENSION", "1024"))
                 from redis.commands.search.field import NumericField
                 schema = [
                     TextField("title", weight=2.0),

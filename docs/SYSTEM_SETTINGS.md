@@ -41,8 +41,8 @@
 - **API Key**: OpenAI API密钥（敏感信息）
 - **API Base URL**: API基础URL（例如: https://api.openai.com/v1）
 - **模型名称**: 主模型名称（例如: gpt-4o-mini）
-- **Embedding模型**: 向量嵌入模型名称（例如: text-embedding-3-small）
-- **Embedding维度**: 向量维度（默认: 1536）
+- **Embedding模型**: 向量嵌入模型名称（例如: BAAI/bge-m3）
+- **Embedding维度**: 向量维度（默认: 1024）
 - **最大输入Token**: 模型最大输入token数（可选）
 - **最大输出Token**: 模型最大输出token数（可选）
 

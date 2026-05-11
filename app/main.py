@@ -2071,7 +2071,9 @@ async def update_llm_config(config_data: Dict[str, Any]):
             'model_max_input_tokens': 'max_input_tokens',
             'model_max_output_tokens': 'max_output_tokens',
             'rerank_enabled': 'rerank_enabled',
-            'rerank_model_name': 'rerank_model_name'
+            'rerank_model_name': 'rerank_model_name',
+            'rerank_api_key': 'rerank_api_key',
+            'rerank_api_base': 'rerank_api_base'
         }
 
         # 构建新的 LLM 配置
@@ -2401,12 +2403,14 @@ async def get_system_config():
             "openai_api_key": openai_config.get('api_key', ''),
             "openai_api_base": openai_config.get('api_base', ''),
             "openai_model": openai_config.get('model', 'gpt-4o-mini'),
-            "openai_embedding_model": embedding_config.get('model', 'text-embedding-3-small'),
-            "embedding_dimension": embedding_config.get('dimension', 1536),
+            "openai_embedding_model": embedding_config.get('model', 'BAAI/bge-m3'),
+            "embedding_dimension": embedding_config.get('dimension', 1024),
             "model_max_input_tokens": str(openai_config.get('max_input_tokens', '')),
             "model_max_output_tokens": str(openai_config.get('max_output_tokens', '')),
             "rerank_enabled": rerank_config_nested.get('enabled', False),
             "rerank_model_name": rerank_config_nested.get('model', 'BAAI/bge-reranker-v2-m3'),
+            "rerank_api_key": rerank_config_nested.get('api_key', ''),
+            "rerank_api_base": rerank_config_nested.get('api_base', ''),
         }
 
         # Rerank 配置：兼容旧版本，从 rerank.yaml 读取（如果存在）

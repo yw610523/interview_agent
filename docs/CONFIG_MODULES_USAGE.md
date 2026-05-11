@@ -46,7 +46,7 @@ print(smtp.port)    # 465
 # LLM 配置
 llm = get_llm_config()
 print(llm.model)              # "gpt-4o-mini"
-print(llm.embedding_model)    # "text-embedding-3-small"
+print(llm.embedding_model)    # "BAAI/bge-m3"
 
 # Redis 配置
 redis = get_redis_config()
@@ -102,8 +102,8 @@ class LlmConfig:
     openai_api_key: str = ""
     openai_api_base: str = ""
     model: str = "gpt-4o-mini"
-    embedding_model: str = "text-embedding-3-small"
-    embedding_dimension: int = 1536
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dimension: int = 1024
     max_input_tokens: int = 128000
     max_output_tokens: int = 16384
 ```
@@ -146,7 +146,7 @@ redis_url = redis.build_url()
 @dataclass
 class RerankConfig:
     enabled: bool = False
-    api_url: str = "https://cloud.siliconflow.cn/v1"
+    api_base: str = "https://api.siliconflow.cn/v1"
     api_key: str = ""
     model: str = "BAAI/bge-reranker-v2-m3"
 ```

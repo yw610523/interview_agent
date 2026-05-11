@@ -31,7 +31,7 @@ def test_rerank_fallback():
     rerank_enabled = rerank_config.get('enabled', False)
     if isinstance(rerank_enabled, str):
         rerank_enabled = rerank_enabled.lower() in ('true', '1', 'yes')
-    rerank_api_url = rerank_config.get('api_url', '').strip()
+    rerank_api_base = rerank_config.get('api_base', '').strip()
     rerank_api_key = rerank_config.get('api_key', '').strip()
     
     llm_config = config.get('llm', {})
@@ -39,7 +39,7 @@ def test_rerank_fallback():
     openai_api_key = llm_config.get('openai_api_key', '')
 
     print(f"\n✅ RERANK_ENABLED: {rerank_enabled}")
-    print(f"📡 RERANK_API_URL: '{rerank_api_url}' {'(为空，将复用 OPENAI_API_BASE)' if not rerank_api_url else ''}")
+    print(f"📡 RERANK_API_BASE: '{rerank_api_base}' {'(为空，将复用 OPENAI_API_BASE)' if not rerank_api_base else ''}")
     print(f"🔑 RERANK_API_KEY: '{'已配置' if rerank_api_key else '(为空，将复用 OPENAI_API_KEY)'}'")
     print(f"\n📡 OPENAI_API_BASE: {openai_api_base}")
     print(f"🔑 OPENAI_API_KEY: {'已配置' if openai_api_key else '未配置'}")
@@ -54,9 +54,9 @@ def test_rerank_fallback():
         else:
             print("❌ Rerank 已启用但无 API Key")
         
-        if not rerank_api_url and openai_api_base:
+        if not rerank_api_base and openai_api_base:
             print("✅ Rerank 将复用 OPENAI_API_BASE")
-        elif rerank_api_url:
+        elif rerank_api_base:
             print("✅ Rerank 使用独立的 API URL")
         else:
             print("⚠️  Rerank 无 API URL，将使用 OpenAI 默认地址")

@@ -14,12 +14,12 @@ class RerankConfig:
     
     属性:
         enabled: 是否启用 Rerank
-        api_url: Rerank API 地址
+        api_base: Rerank API 基础 URL
         api_key: Rerank API 密钥
         model: Rerank 模型名称
     """
     enabled: bool = False
-    api_url: str = "https://cloud.siliconflow.cn/v1"
+    api_base: str = "https://api.siliconflow.cn/v1"
     api_key: str = ""
     model: str = "BAAI/bge-reranker-v2-m3"
     
