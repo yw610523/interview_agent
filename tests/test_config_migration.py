@@ -44,7 +44,7 @@ def test_config_loading():
     print("\n🔄 Rerank 配置:")
     rerank_config = config_manager.get_config('rerank')
     print(f"  - Enabled: {rerank_config.get('enabled')}")
-    print(f"  - API URL: {rerank_config.get('api_url')}")
+    print(f"  - API Base: {rerank_config.get('api_base')}")
     print(f"  - API Key: {'***已配置***' if rerank_config.get('api_key') else '❌ 未配置'}")
     print(f"  - Model: {rerank_config.get('model')}")
     

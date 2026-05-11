@@ -48,7 +48,7 @@ class FeedbackService:
         self.redis_client = None
         self.openai_client = None
         self.rerank_enabled = False
-        self.rerank_model = "rerank-sf"
+        self.rerank_model = "BAAI/bge-reranker-v2-m3"
         self.rerank_api_base = ""  # 保存 Rerank API base URL
         self._init_redis()
         self._init_rerank()

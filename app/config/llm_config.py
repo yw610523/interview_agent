@@ -22,8 +22,8 @@ class EmbeddingConfig:
     """Embedding 配置"""
     api_base: str = ""
     api_key: str = ""
-    model: str = "text-embedding-3-small"
-    dimension: int = 1536
+    model: str = "BAAI/bge-m3"
+    dimension: int = 1024
 
 
 @dataclass

@@ -45,8 +45,8 @@ def test_update_llm_config():
         "openai_api_key": "test-key-123",
         "openai_api_base": "https://api.openai.com/v1",
         "openai_model": "gpt-4o-mini",
-        "openai_embedding_model": "text-embedding-3-small",
-        "embedding_dimension": 1536
+        "openai_embedding_model": "BAAI/bge-m3",
+        "embedding_dimension": 1024
     }
 
     try:

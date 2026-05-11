@@ -103,7 +103,7 @@
                 :wrapper-col="{ span: 16 }"
             >
               <a-form-item label="Embedding模型">
-                <a-input v-model:value="llmConfig.openai_embedding_model" placeholder="例如: text-embedding-3-small"/>
+                <a-input v-model:value="llmConfig.openai_embedding_model" placeholder="例如: BAAI/bge-m3"/>
               </a-form-item>
 
               <a-form-item label="Embedding维度">
@@ -121,11 +121,27 @@
             >
               <a-form-item label="启用 Rerank">
                 <a-switch v-model:checked="llmConfig.rerank_enabled"/>
-                <span style="margin-left: 8px; color: #8c8c8c;">{{ llmConfig.rerank_enabled ? '已启用' : '未启用' }}</span>
+                <span style="margin-left: 8px; color: #8c8c8c;">{{
+                    llmConfig.rerank_enabled ? '已启用' : '未启用'
+                  }}</span>
               </a-form-item>
 
               <a-form-item label="Rerank 模型名称" v-if="llmConfig.rerank_enabled">
-                <a-input v-model:value="llmConfig.rerank_model_name" placeholder="例如: rerank-sf"/>
+                <a-input v-model:value="llmConfig.rerank_model_name" placeholder="例如: BAAI/bge-reranker-v2-m3"/>
+              </a-form-item>
+
+              <a-form-item label="API Key" v-if="llmConfig.rerank_enabled">
+                <a-input-password v-model:value="llmConfig.rerank_api_key" placeholder="留空则复用 LLM API Key"/>
+                <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
+                  如果留空，将使用 EMBEDDING_API_KEY 或 OPENAI_API_KEY
+                </div>
+              </a-form-item>
+
+              <a-form-item label="API Base URL" v-if="llmConfig.rerank_enabled">
+                <a-input v-model:value="llmConfig.rerank_api_base" placeholder="例如: https://api.siliconflow.cn/v1"/>
+                <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
+                  如果留空，将使用环境变量 RERANK_API_BASE
+                </div>
               </a-form-item>
             </a-form>
           </a-card>
@@ -142,41 +158,6 @@
             </a-space>
           </a-form-item>
         </a-space>
-      </a-tab-pane>
-
-      <!-- Redis配置 -->
-      <a-tab-pane key="redis" tab="🗄️ Redis配置">
-        <a-form
-            :model="redisConfig"
-            :label-col="{ span: 8 }"
-            :wrapper-col="{ span: 16 }"
-        >
-          <a-form-item label="Redis服务器">
-            <a-input v-model:value="redisConfig.host" placeholder="例如: localhost, redis.example.com"/>
-          </a-form-item>
-
-          <a-form-item label="Redis端口">
-            <a-input-number v-model:value="redisConfig.port" :min="1" :max="65535" placeholder="默认: 6379"/>
-          </a-form-item>
-
-          <a-form-item label="密码">
-            <a-input-password v-model:value="redisConfig.password" placeholder="留空表示无需密码"/>
-            <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
-              如果不需要密码认证，请留空
-            </div>
-          </a-form-item>
-
-          <a-form-item :wrapper-col="{ offset: 8 }">
-            <a-space>
-              <a-button type="primary" @click="saveRedisConfig" :loading="savingRedis">
-                保存配置
-              </a-button>
-              <a-button @click="loadSystemConfig">
-                重置
-              </a-button>
-            </a-space>
-          </a-form-item>
-        </a-form>
       </a-tab-pane>
 
       <!-- 邮件配置 -->
@@ -252,13 +233,6 @@
 
       <!-- 内容处理配置 -->
       <a-tab-pane key="content" tab="📄 内容处理">
-        <a-alert
-            message="提示：滑动窗口切分策略可以解决语义截断问题，确保每个 Chunk 都保留上下文"
-            type="info"
-            show-icon
-            style="margin-bottom: 16px"
-        />
-
         <a-form
             :model="contentConfig"
             :label-col="{ span: 8 }"
@@ -440,12 +414,14 @@ const llmConfig = ref({
   openai_api_key: '',
   openai_api_base: '',
   openai_model: 'gpt-4o-mini',
-  openai_embedding_model: 'text-embedding-3-small',
-  embedding_dimension: 1536,
+  openai_embedding_model: 'BAAI/bge-m3',
+  embedding_dimension: 1024,
   model_max_input_tokens: '',
   model_max_output_tokens: '',
   rerank_enabled: false,
-  rerank_model_name: 'rerank-sf'
+  rerank_model_name: 'BAAI/bge-reranker-v2-m3',
+  rerank_api_key: '',
+  rerank_api_base: ''
 })
 
 // 邮件配置
@@ -455,13 +431,6 @@ const emailConfig = ref({
   smtp_user: '',
   smtp_password: '',
   smtp_test_user: ''
-})
-
-// Redis配置
-const redisConfig = ref({
-  host: 'localhost',
-  port: 6379,
-  password: ''
 })
 
 // 定时任务配置
@@ -507,7 +476,7 @@ const defaultPrompts = {
 **必须使用 Markdown 格式编写答案**，以提高可读性：
 - 使用 \`## 标题\` 分隔不同部分
 - 使用 **粗体** 强调关键概念
-- 使用 \`代码块\` 包裹代码示例（指定语言，如 \`\`\`python）
+- 使用 \`代码块\` 包裹代码示例（指定语言，如 \`\`\`python\`)
 - 使用 - 列表 或 1. 有序列表 组织要点
 - 使用 > 引用块 标注重要说明
 - 适当使用空行分隔段落
@@ -537,7 +506,6 @@ const defaultPrompts = {
 // 状态
 const savingCrawler = ref(false)
 const savingLlm = ref(false)
-const savingRedis = ref(false)
 const savingEmail = ref(false)
 const savingScheduler = ref(false)
 const testingEmail = ref(false)
@@ -574,12 +542,6 @@ const loadSystemConfig = async () => {
       // 加载邮件配置
       if (config.email) {
         emailConfig.value = config.email
-        // 不再隐藏密码，由 a-input-password 组件自动处理
-      }
-
-      // 加载 Redis 配置
-      if (config.redis) {
-        redisConfig.value = config.redis
         // 不再隐藏密码，由 a-input-password 组件自动处理
       }
 
@@ -636,27 +598,6 @@ const saveLlmConfig = async () => {
     console.error(error)
   } finally {
     savingLlm.value = false
-  }
-}
-
-// 保存Redis配置
-const saveRedisConfig = async () => {
-  if (!redisConfig.value.host) {
-    message.warning('请填写Redis服务器地址')
-    return
-  }
-
-  savingRedis.value = true
-  try {
-    const res = await systemConfigApi.updateRedisConfig(redisConfig.value)
-    if (res.status === 'success') {
-      message.success('Redis配置保存成功')
-    }
-  } catch (error) {
-    message.error('保存Redis配置失败')
-    console.error(error)
-  } finally {
-    savingRedis.value = false
   }
 }
 

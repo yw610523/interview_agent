@@ -15,10 +15,10 @@ from urllib.parse import urlparse
 
 from app.config.crawler_config import CrawlerConfig
 from app.config.firecrawl_config import get_firecrawl_config
+from .firecrawl_mcp import FirecrawlMCPService
 from .sitemap_parser import SitemapParser
 from .url_filter import URLFilter
 from .url_scanner import URLScanner, ScanResult
-from .firecrawl_mcp import FirecrawlMCPService
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ class SitemapCrawler:
         try:
             # 从 firecrawl.yaml 读取详细配置
             firecrawl_cfg = get_firecrawl_config()
-            
+
             firecrawl_config = {
                 "firecrawl_api_url": firecrawl_cfg.api_url,
                 "firecrawl_api_key": firecrawl_cfg.api_key,
@@ -89,13 +89,6 @@ class SitemapCrawler:
                 "firecrawl_api_version": firecrawl_cfg.api_version,
             }
             self._firecrawl_service = FirecrawlMCPService.from_config(firecrawl_config)
-
-            # 检查服务是否可用
-            if self._firecrawl_service.is_available():
-                logger.info("Firecrawl MCP 服务已连接")
-            else:
-                logger.warning("Firecrawl MCP 服务不可用，将回退到传统爬取方式")
-                self._firecrawl_service = None
         except Exception as e:
             logger.error(f"初始化 Firecrawl 失败: {str(e)}")
             self._firecrawl_service = None
@@ -186,20 +179,20 @@ class SitemapCrawler:
 
         # 解析 URL
         parsed = urlparse(url)
-        
+
         # 如果只是域名（没有路径），添加 root_url 和 sitemap 路径
         if not parsed.path or parsed.path == '/':
             # 构建完整路径：root_url + sitemap_path
             root_url = self.config.root_url.rstrip('/')
             sitemap_path = self.config.sitemap_path
-            
+
             # 确保 sitemap_path 以 / 开头
             if not sitemap_path.startswith('/'):
                 sitemap_path = '/' + sitemap_path
-            
+
             # 拼接：root_url + sitemap_path
             full_path = f"{root_url}{sitemap_path}" if root_url else sitemap_path
-            
+
             url = f"{parsed.scheme}://{parsed.netloc}{full_path}"
 
         return url
@@ -527,7 +520,7 @@ class SitemapCrawler:
         # Calculate average load time
         if self.stats.successful_scans > 0:
             summary['avg_load_time'] = (
-                self.stats.total_load_time / self.stats.successful_scans
+                    self.stats.total_load_time / self.stats.successful_scans
             )
 
         return summary
