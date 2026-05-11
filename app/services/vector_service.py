@@ -5,11 +5,11 @@
 用于存储和检索面试问题的向量表示。
 """
 
-import struct
-import os
 import logging
-from typing import List, Dict, Any, Optional
+import os
+import struct
 from dataclasses import dataclass
+from typing import List, Dict, Any, Optional
 
 # 导入统一配置管理器
 from app.config.config_manager import config_manager
@@ -81,10 +81,8 @@ class VectorService:
         # 2. 初始化 OpenAI 客户端（用于生成 Embedding）
         # 优先使用独立的 Embedding 配置，兼容 LLM 配置
         # config_manager 会自动从 YAML 读取并解析环境变量
-        api_key = config_manager.get('llm.embedding.api_key') or \
-                  config_manager.get('llm.openai.api_key')
-        api_base = config_manager.get('llm.embedding.api_base') or \
-                   config_manager.get('llm.openai.api_base')
+        api_key = config_manager.get('llm.embedding.api_key')
+        api_base = config_manager.get('llm.embedding.api_base')
 
         if api_key and OPENAI_AVAILABLE:
             try:
@@ -95,6 +93,11 @@ class VectorService:
                 logger.info("OpenAI Embedding 客户端初始化成功")
             except Exception as e:
                 logger.error(f"OpenAI 客户端初始化失败: {str(e)}")
+        else:
+            if not api_key:
+                logger.warning("Embedding API Key 未配置，将使用简单哈希作为备用方案")
+            if not OPENAI_AVAILABLE:
+                logger.warning("OpenAI SDK 未安装，将使用简单哈希作为备用方案")
 
     def _create_embedding(self, text: str) -> List[float]:
         """
@@ -107,43 +110,49 @@ class VectorService:
         try:
             # 优先从 config.yaml 读取 Embedding 模型名称和维度
             embedding_model = config_manager.get('llm.embedding.model') or \
-                             config_manager.get('llm.embedding_model') or \
-                             os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+                              config_manager.get('llm.embedding_model') or \
+                              os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
             embedding_dim = config_manager.get('llm.embedding.dimension') or \
-                           config_manager.get('llm.embedding_dimension') or \
-                           int(os.getenv("EMBEDDING_DIMENSION", "1024"))
-            
+                            config_manager.get('llm.embedding_dimension') or \
+                            int(os.getenv("EMBEDDING_DIMENSION", "1024"))
+
             # 构建请求参数
             request_params = {
                 "input": text,
                 "model": embedding_model,
             }
-            
+
             # 对于支持动态维度的模型（如 OpenAI text-embedding-3系列），传入 dimensions 参数
             # BAAI/bge-m3 等固定维度模型会忽略此参数
             if "text-embedding-3" in embedding_model:
                 request_params["dimensions"] = embedding_dim
-            
+
+            logger.debug(f"调用 Embedding API: model={embedding_model}, input_length={len(text)}")
             response = self.openai_client.embeddings.create(**request_params)
+            logger.debug(f"Embedding API 响应类型: {type(response)}")
 
             # 检查响应类型，确保不是字符串
             if isinstance(response, str):
                 logger.error(f"Embedding API 返回字符串而不是对象: {response[:200]}")
                 raise Exception(f"API 返回字符串响应: {response[:100]}...")
 
-            # 检查响应格式是否正确
-            if not hasattr(response, "data") or not response.data:
-                logger.error(f"Embedding API 响应格式异常: {type(response)} - {response}")
-                raise Exception(
-                    f"Embedding API 响应格式异常: {type(response)} - {response}"
-                )
+            # 检查响应是否有 data 属性（防止 AttributeError）
+            try:
+                if not hasattr(response, "data") or not response.data:
+                    logger.error(f"Embedding API 响应格式异常: {type(response)} - {response}")
+                    raise Exception(
+                        f"Embedding API 响应格式异常: {type(response)} - {str(response)[:200]}"
+                    )
+            except AttributeError as attr_err:
+                logger.error(f"响应对象缺少 data 属性: {type(response)} - {str(response)[:200]}")
+                raise Exception(f"响应格式错误: {str(attr_err)}")
 
             if not hasattr(response.data[0], "embedding"):
                 logger.error(f"Embedding API 响应数据格式异常: {response.data}")
                 raise Exception("Embedding API 响应数据格式异常")
 
             embedding = response.data[0].embedding
-            
+
             # 验证向量维度是否与配置一致
             actual_dim = len(embedding)
             if actual_dim != embedding_dim:
@@ -151,29 +160,37 @@ class VectorService:
                     f"向量维度不匹配: 模型 '{embedding_model}' 返回 {actual_dim} 维，"
                     f"但配置为 {embedding_dim} 维。这可能导致搜索失败。"
                 )
-            
+
             return embedding
         except Exception as e:
             error_msg = str(e)
             logger.error(f"生成 Embedding 失败: {error_msg}")
-            
+
             # 如果是网络错误或API错误，记录详细信息
             if "Connection" in error_msg or "HTTP" in error_msg or "307" in error_msg:
                 logger.error(f"可能是 API 端点配置错误，请检查 EMBEDDING_API_BASE 配置")
-            
+
             logger.warning("使用简单哈希生成向量作为备用方案")
             return self._simple_hash_embedding(text)
 
     def _simple_hash_embedding(self, text: str) -> List[float]:
         """
         使用简单哈希生成向量（备用方案）
+        
+        注意：此方法仅用于调试和降级场景，生成的向量不具备语义相似性。
+        请优先修复 Embedding API 配置以获得准确的向量表示。
         """
         import hashlib
 
+        # 动态获取配置的维度，确保与索引一致
+        embedding_dim = config_manager.get('llm.embedding.dimension') or \
+                        config_manager.get('llm.embedding_dimension') or \
+                        int(os.getenv("EMBEDDING_DIMENSION", "1024"))
+
         hash_val = int(hashlib.md5(text.encode()).hexdigest(), 16)
-        # 生成一个简单的 384 维向量
+        # 生成指定维度的向量
         vector = []
-        for i in range(384):
+        for i in range(embedding_dim):
             vector.append(((hash_val >> (i * 8)) & 0xFF) / 255.0)
         return vector
 
@@ -194,19 +211,19 @@ class VectorService:
             else:
                 num_docs = getattr(info, 'num_docs', 0)
                 attributes = getattr(info, 'attributes', [])
-            
+
             # 确保 attributes 是列表
             if not isinstance(attributes, list):
                 logger.warning(f"attributes 不是列表类型: {type(attributes)}")
                 attributes = []
-            
+
             # 检查是否包含 importance_score 字段
             has_importance_field = any(
                 (isinstance(attr, dict) and attr.get('identifier') == 'importance_score') or
                 (hasattr(attr, 'identifier') and getattr(attr, 'identifier', None) == 'importance_score')
                 for attr in attributes
             )
-            
+
             if has_importance_field:
                 logger.info(f"索引 {self.index_name} 已存在，文档数: {num_docs}")
                 return True
@@ -214,7 +231,7 @@ class VectorService:
                 # 索引存在但缺少 importance_score 字段，需要重建
                 logger.warning(f"索引 {self.index_name} 缺少 importance_score 字段，需要重建")
                 raise Exception("Index schema outdated")
-                
+
         except Exception as e:
             error_msg = str(e)
             # 如果是因为索引不存在导致的错误，则创建索引
@@ -235,8 +252,8 @@ class VectorService:
             try:
                 # 优先从 config.yaml 读取，兼容环境变量
                 embedding_dim = config_manager.get('llm.embedding.dimension') or \
-                               config_manager.get('llm.embedding_dimension') or \
-                               int(os.getenv("EMBEDDING_DIMENSION", "1024"))
+                                config_manager.get('llm.embedding_dimension') or \
+                                int(os.getenv("EMBEDDING_DIMENSION", "1024"))
                 from redis.commands.search.field import NumericField
                 schema = [
                     TextField("title", weight=2.0),
@@ -359,10 +376,10 @@ class VectorService:
         return count
 
     def search(
-        self,
-        query: str,
-        limit: int = 10,
-        filters: Optional[Dict[str, List[str]]] = None,
+            self,
+            query: str,
+            limit: int = 10,
+            filters: Optional[Dict[str, List[str]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         搜索相关问题
@@ -528,10 +545,10 @@ class VectorService:
         """
         if not self.redis_client:
             return False
-        
+
         try:
             key = f"question:{question_id}"
-            
+
             # 构建更新数据
             data = {
                 "title": question_data.get('title', ''),
@@ -542,14 +559,14 @@ class VectorService:
                 "difficulty": question_data.get('difficulty', ''),
                 "category": question_data.get('category', ''),
             }
-            
+
             self.redis_client.hset(key, mapping=data)
-            
+
             # 重要：RediSearch 会自动索引 Hash 字段的变化
             # 但为了确保索引同步，我们记录日志
             logger.info(f"题目更新成功: {question_id}, importance_score={question_data.get('importance_score')}")
             return True
-            
+
         except Exception as e:
             logger.error(f"更新题目失败: {str(e)}")
             return False
@@ -735,10 +752,10 @@ class VectorService:
             return 0
 
     def exact_search(
-        self,
-        query: str,
-        limit: int = 10,
-        filters: Optional[Dict[str, List[str]]] = None,
+            self,
+            query: str,
+            limit: int = 10,
+            filters: Optional[Dict[str, List[str]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         精确搜索（关键词匹配）
@@ -832,10 +849,10 @@ class VectorService:
             return []
 
     def merge_search_results(
-        self,
-        semantic_results: List[Dict[str, Any]],
-        exact_results: List[Dict[str, Any]],
-        limit: int = 10,
+            self,
+            semantic_results: List[Dict[str, Any]],
+            exact_results: List[Dict[str, Any]],
+            limit: int = 10,
     ) -> List[Dict[str, Any]]:
         """
         合并语义搜索和精确搜索结果
@@ -892,13 +909,14 @@ class VectorService:
             result = {k: v for k, v in item.items() if k not in ['match_type', 'combined_score']}
             final_results.append(result)
 
-        logger.info(f"混合搜索合并结果: {len(final_results)} 个 (精确:{len(exact_results)}, 语义:{len(semantic_results)})")
+        logger.info(
+            f"混合搜索合并结果: {len(final_results)} 个 (精确:{len(exact_results)}, 语义:{len(semantic_results)})")
         return final_results
 
     def find_similar_question(
-        self,
-        text: str,
-        threshold: float = 0.85
+            self,
+            text: str,
+            threshold: float = 0.85
     ) -> Optional[Dict[str, Any]]:
         """
         查找相似问题
@@ -913,33 +931,33 @@ class VectorService:
         try:
             # 使用语义搜索查找相似问题
             results = self.search(text, limit=1)
-            
+
             if not results:
                 return None
-            
+
             # 检查相似度是否达到阈值
             best_match = results[0]
             score = best_match.get('score', 0.0)
-            
+
             # RediSearch KNN 返回的是距离，需要转换为相似度
             # COSINE 距离范围 [0, 2]，相似度 = 1 - distance/2
             similarity = 1.0 - (score / 2.0)
-            
+
             if similarity >= threshold:
                 best_match['score'] = similarity
                 return best_match
             else:
                 logger.debug(f"最高相似度 {similarity:.2f} 低于阈值 {threshold}")
                 return None
-                
+
         except Exception as e:
             logger.error(f"查找相似问题失败: {str(e)}")
             return None
-    
+
     def merge_into_existing_question(
-        self,
-        existing_id: str,
-        new_question: VectorRecord
+            self,
+            existing_id: str,
+            new_question: VectorRecord
     ) -> bool:
         """
         将新问题合并到已存在的问题中
@@ -961,44 +979,44 @@ class VectorService:
             # 获取已存在的问题
             existing_key = f"question:{existing_id}"
             existing_data = self.redis_client.hgetall(existing_key)
-            
+
             if not existing_data:
                 logger.warning(f"已存在的问题不存在: {existing_id}")
                 return False
-            
+
             # 合并来源 URL
             existing_url = existing_data.get(b'source_url', b'').decode()
             new_url = new_question.source_url
-            
+
             if existing_url and new_url and new_url not in existing_url:
                 merged_url = f"{existing_url};{new_url}"
             elif new_url:
                 merged_url = new_url
             else:
                 merged_url = existing_url
-            
+
             # 合并标签
             existing_tags = existing_data.get(b'tags', b'').decode().split(',') if existing_data.get(b'tags') else []
             new_tags = new_question.tags
             merged_tags = list(set(existing_tags + new_tags))  # 去重
-            
+
             # 选择更长的答案
             existing_answer = existing_data.get(b'answer', b'').decode()
             if len(new_question.answer) > len(existing_answer):
                 final_answer = new_question.answer
             else:
                 final_answer = existing_answer
-            
+
             # 更新 Redis
             self.redis_client.hset(existing_key, mapping={
                 'source_url': merged_url,
                 'tags': ','.join(merged_tags),
                 'answer': final_answer,
             })
-            
+
             logger.info(f"问题合并成功: {new_question.title} -> {existing_id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"合并问题失败: {str(e)}")
             return False

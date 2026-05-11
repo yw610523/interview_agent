@@ -1,89 +1,98 @@
 #!/usr/bin/env python3
 """
-重建向量索引脚本
+强制重建向量索引脚本
 
-用于解决向量维度不匹配的问题
+用于解决向量维度不匹配问题。
+会删除所有现有索引和数据，使用当前配置重新创建。
 """
-
 import sys
 import os
-from pathlib import Path
 
-# 添加项目根目录到 Python 路径
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+# 添加项目根目录到路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.services.vector_service import vector_service
+from app.services.vector_service import VectorService
 from app.config.config_manager import config_manager
 
 
-def rebuild_index():
-    """重建向量索引"""
+def force_rebuild_index():
+    """强制重建索引"""
     print("=" * 60)
-    print("重建向量索引")
+    print("强制重建向量索引")
     print("=" * 60)
     
-    # 获取当前配置的维度
+    # 创建 VectorService 实例
+    vector_service = VectorService()
+    
+    # 1. 获取当前配置的维度
     embedding_dim = config_manager.get('llm.embedding.dimension') or \
                    config_manager.get('llm.embedding_dimension') or \
-                   int(os.getenv("EMBEDDING_DIMENSION", "1536"))
+                   int(os.getenv("EMBEDDING_DIMENSION", "1024"))
     
-    print(f"\n当前配置的向量维度: {embedding_dim}")
-    print(f"索引名称: {vector_service.index_name}")
+    print(f"\n📊 当前配置的向量维度: {embedding_dim}")
     
-    # 检查 Redis 连接
-    if not vector_service.redis_client:
-        print("\n❌ Redis 客户端未初始化，请检查 Redis 配置")
-        return False
-    
+    # 2. 删除旧索引
     try:
-        # 检查索引是否存在
-        index_info = vector_service.redis_client.ft(vector_service.index_name).info()
-        print(f"\n当前索引信息:")
-        print(f"  - 索引名称: {index_info.get('index_name')}")
-        print(f"  - 向量维度: {index_info.get('attributes', [{}])[0].get('dims', 'unknown')}")
-        print(f"  - 文档数量: {index_info.get('num_docs', 0)}")
+        index_name = vector_service.index_name
+        print(f"🗑️  正在删除旧索引: {index_name}")
+        vector_service.redis_client.ft(index_name).dropindex(delete_documents=True)
+        print(f"✅ 旧索引已删除")
     except Exception as e:
-        if "Unknown index name" in str(e):
-            print("\n索引不存在，将创建新索引")
-        else:
-            print(f"\n❌ 获取索引信息失败: {e}")
-            return False
+        print(f"⚠️  删除索引失败（可能不存在）: {str(e)}")
     
-    # 询问是否继续
-    print("\n⚠️  重建索引将删除现有索引并重新创建")
-    print("⚠️  已存储的问题不会被删除，但需要重新生成向量")
-    
-    response = input("\n是否继续？(yes/no): ")
-    if response.lower() not in ['yes', 'y']:
-        print("已取消")
-        return False
-    
-    # 删除旧索引
-    try:
-        vector_service.redis_client.ft(vector_service.index_name).dropindex(delete_documents=False)
-        print("✅ 旧索引已删除")
-    except Exception as e:
-        if "Unknown index name" not in str(e):
-            print(f"❌ 删除索引失败: {e}")
-            return False
-    
-    # 重新初始化索引
-    vector_service.index_initialized = False
+    # 3. 重建索引
+    print(f"\n🔨 正在创建新索引（维度: {embedding_dim}）...")
     success = vector_service._ensure_index()
     
     if success:
-        print("\n✅ 新索引创建成功")
-        print(f"   向量维度: {embedding_dim}")
-        print("\n提示:")
-        print("  - 现有问题需要重新爬取或手动重新生成向量")
-        print("  - 可以通过前端触发重新爬取")
+        print(f"✅ 索引重建成功！")
+        print(f"\n📝 索引信息:")
+        print(f"   - 名称: {vector_service.index_name}")
+        print(f"   - 维度: {embedding_dim}")
+        print(f"   - 距离度量: COSINE")
     else:
-        print("\n❌ 创建索引失败")
+        print(f"❌ 索引重建失败")
+        return False
     
-    return success
+    # 4. 验证索引
+    print(f"\n🔍 验证索引...")
+    try:
+        info = vector_service.redis_client.ft(vector_service.index_name).info()
+        if isinstance(info, dict):
+            num_docs = info.get('num_docs', 0)
+            attributes = info.get('attributes', [])
+        else:
+            num_docs = getattr(info, 'num_docs', 0)
+            attributes = getattr(info, 'attributes', [])
+        
+        print(f"✅ 索引验证通过")
+        print(f"   - 文档数: {num_docs}")
+        print(f"   - 字段数: {len(attributes)}")
+        
+        # 检查 embedding 字段的维度
+        for attr in attributes:
+            if isinstance(attr, dict) and attr.get('identifier') == 'embedding':
+                dim = attr.get('dims', 'N/A')
+                print(f"   - Embedding 维度: {dim}")
+                if str(dim) != str(embedding_dim):
+                    print(f"⚠️  警告: 索引维度 ({dim}) 与配置 ({embedding_dim}) 不匹配！")
+                break
+    except Exception as e:
+        print(f"❌ 验证失败: {str(e)}")
+        return False
+    
+    print("\n" + "=" * 60)
+    print("索引重建完成！")
+    print("=" * 60)
+    return True
 
 
 if __name__ == "__main__":
-    success = rebuild_index()
-    sys.exit(0 if success else 1)
+    try:
+        success = force_rebuild_index()
+        sys.exit(0 if success else 1)
+    except Exception as e:
+        print(f"\n❌ 重建失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

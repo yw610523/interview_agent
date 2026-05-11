@@ -15,6 +15,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, HttpUrl
 
+# 导入统一配置管理器
+from app.config.config_manager import config_manager
 from app.config.crawler_config import (
     get_scheduler_config,
     load_crawler_config,
@@ -30,10 +32,9 @@ from app.services.llm_service import LLMService
 # 导入爬虫相关模块
 from app.services.sitemap_crawler import SitemapCrawler
 from app.services.vector_service import VectorService, VectorRecord
-# 导入统一配置管理器
-from app.config.config_manager import config_manager
 
 app = FastAPI(title="Interview AI Agent")
+
 
 def _mask_sensitive(key: str, value: str) -> str:
     """对敏感信息进行脱敏处理"""
@@ -44,12 +45,13 @@ def _mask_sensitive(key: str, value: str) -> str:
         return value[:4] + "***" + value[-4:] if len(value) > 8 else "***"
     return str(value)
 
+
 def _log_startup_config():
     """启动时打印配置信息（脱敏）"""
     logger.info("=" * 60)
     logger.info("📋 系统配置信息（启动自检）")
     logger.info("=" * 60)
-    
+
     modules = ['llm', 'redis', 'smtp', 'content', 'crawler', 'rerank']
     for module in modules:
         try:
@@ -67,9 +69,11 @@ def _log_startup_config():
             logger.warning(f"读取 {module} 配置失败: {e}")
     logger.info("=" * 60)
 
+
 @app.on_event("startup")
 async def startup_event():
     _log_startup_config()
+
 
 # 配置日志
 logging.basicConfig(
@@ -113,6 +117,7 @@ async def startup_event():
         except Exception as e:
             logger.warning(f"读取 {module} 配置失败: {e}")
     logger.info("=" * 60)
+
 
 # 全局变量存储最近一次爬取结果
 last_crawl_result: Optional[Dict[str, Any]] = None
@@ -904,15 +909,22 @@ async def get_recommended_questions(
         # 按优先级分数降序排序
         scored_questions.sort(key=lambda x: x['priority_score'], reverse=True)
 
-        # 如果启用 Rerank，先取更多候选，然后重排序
+        # 如果启用 Rerank,先取更多候选,然后重排序
         rerank_success = False
         if use_rerank and feedback_service.rerank_enabled:
             try:
-                # 取 3 倍数量的候选题目，增加随机性避免每次都是同样的题
+                # 扩大候选池到 limit * 10,增加多样性
                 import random
-                candidate_pool_size = min(limit * 5, len(scored_questions))
+                candidate_pool_size = min(limit * 10, len(scored_questions))
                 candidate_pool = scored_questions[:candidate_pool_size]
-                # 从候选池中随机抽样
+
+                # 给优先级分数添加随机扰动(±15%),避免每次都是同样的题
+                for q in candidate_pool:
+                    noise = random.uniform(0.85, 1.15)
+                    q['priority_score'] *= noise
+
+                # 重新排序并随机抽样
+                candidate_pool.sort(key=lambda x: x['priority_score'], reverse=True)
                 candidate_count = min(limit * 3, len(candidate_pool))
                 candidates = random.sample(candidate_pool, candidate_count)
 
@@ -936,19 +948,31 @@ async def get_recommended_questions(
                 rerank_success = True
                 logger.info(f"推荐接口 Rerank 成功，返回 {len(recommended)} 道题目")
             except Exception as e:
-                logger.warning(f"Rerank 失败，降级为默认排序: {str(e)}")
-                # Rerank 失败，降级为默认排序（带随机性）
+                logger.warning(f"Rerank 失败,降级为默认排序: {str(e)}")
+                # Rerank 失败,降级为默认排序(带随机性)
                 import random
-                candidate_pool_size = min(limit * 3, len(scored_questions))
+                candidate_pool_size = min(limit * 10, len(scored_questions))
                 candidate_pool = scored_questions[:candidate_pool_size]
-                random.shuffle(candidate_pool)
+
+                # 添加随机扰动
+                for q in candidate_pool:
+                    noise = random.uniform(0.85, 1.15)
+                    q['priority_score'] *= noise
+
+                candidate_pool.sort(key=lambda x: x['priority_score'], reverse=True)
                 recommended = candidate_pool[:limit]
         else:
-            # 直接返回前 limit 个（带随机性，从候选池中随机抽样）
+            # 直接返回前 limit 个(带随机性,从候选池中随机抽样)
             import random
-            candidate_pool_size = min(limit * 3, len(scored_questions))
+            candidate_pool_size = min(limit * 10, len(scored_questions))
             candidate_pool = scored_questions[:candidate_pool_size]
-            random.shuffle(candidate_pool)
+
+            # 添加随机扰动后重新排序
+            for q in candidate_pool:
+                noise = random.uniform(0.85, 1.15)
+                q['priority_score'] *= noise
+
+            candidate_pool.sort(key=lambda x: x['priority_score'], reverse=True)
             recommended = candidate_pool[:limit]
 
         return {
@@ -1605,120 +1629,9 @@ async def merge_duplicate_questions(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/crawl/single-page", summary="智能爬取单个页面")
-async def crawl_single_page(url: str):
-    """
-    智能爬取单个页面，识别其中的面试问题并存入向量数据库
-
-    参数:
-        url: 要爬取的页面URL
-    """
-    try:
-        from app.services.url_scanner import URLScanner
-        from app.services.vector_service import VectorRecord
-        import time
-
-        start_time = time.time()
-        logger.info(f"开始爬取单个页面: {url}")
-
-        # 1. 扫描页面（异步执行，不阻塞事件循环）
-        logger.info("步骤1: 正在扫描页面...")
-
-        # 从配置中读取 Firecrawl 设置
-        from app.config.config_manager import config_manager
-        
-        crawler_config_dict = config_manager.get_config('crawler')
-        firecrawl_config_dict = config_manager.get_config('firecrawl')
-        
-        scanner = URLScanner(
-            timeout=crawler_config_dict.get('timeout', 30),
-            follow_redirects=True,
-            verify_ssl=True,
-            max_content_length=5 * 1024 * 1024,
-            use_firecrawl=firecrawl_config_dict.get('enabled', False),
-            firecrawl_api_url=firecrawl_config_dict.get('api_url', ''),
-            firecrawl_api_key=firecrawl_config_dict.get('api_key', ''),
-            firecrawl_timeout=firecrawl_config_dict.get('timeout', 300),
-            firecrawl_api_version=firecrawl_config_dict.get('api_version', 'v2'),
-            firecrawl_only_main_content=firecrawl_config_dict.get('only_main_content', True),
-        )
-        scan_result = await run_sync(scanner.scan, url)
-
-        if scan_result.error:
-            raise HTTPException(status_code=400, detail=f"页面扫描失败: {scan_result.error}")
-
-        logger.info(f"页面扫描成功: {scan_result.title}, 内容长度: {len(scan_result.text_content or '')} 字符")
-
-        # 2. 构建页面数据
-        page_data = {
-            "url": url,
-            "title": scan_result.title or "",
-            "text_content": scan_result.text_content or "",
-            "html_content": scan_result.html_content or "",
-        }
-
-        # 3. 使用大模型解析页面内容
-        inserted_count = 0
-        parsed_questions = []
-        processing_steps = [
-            {"step": 1, "message": "页面扫描完成", "progress": 20},
-        ]
-
-        def on_question_found(questions):
-            nonlocal inserted_count
-            records = []
-            for q in questions:
-                record = VectorRecord(
-                    id="",
-                    title=q.title,
-                    answer=q.answer,
-                    source_url=q.source_url,
-                    tags=q.tags,
-                    importance_score=q.importance_score,
-                    difficulty=q.difficulty,
-                    category=q.category,
-                )
-                records.append(record)
-            count = vector_service.insert_questions(records)
-            inserted_count += count
-            logger.info(f"识别到 {len(questions)} 个问题，已插入 {count} 个到向量数据库")
-
-        # 调用大模型处理单个页面
-        logger.info("步骤2: 正在使用AI识别面试问题...")
-        processing_steps.append({"step": 2, "message": "正在分析页面内容...", "progress": 40})
-
-        parsed_questions = llm_service.parse_crawl_results(
-            [page_data], on_question_found=on_question_found
-        )
-
-        processing_steps.append({"step": 3, "message": "问题识别完成", "progress": 80})
-        processing_steps.append({"step": 4, "message": "正在存入向量数据库...", "progress": 90})
-
-        end_time = time.time()
-        total_time = end_time - start_time
-
-        result = {
-            "status": "success",
-            "message": "页面爬取完成",
-            "url": url,
-            "title": scan_result.title,
-            "parsed_questions": len(parsed_questions),
-            "inserted_questions": inserted_count,
-            "word_count": scan_result.word_count,
-            "load_time": scan_result.load_time,
-            "total_processing_time": round(total_time, 2),
-            "processing_steps": processing_steps,
-        }
-
-        logger.info(f"单页爬取完成: {result}")
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"单页爬取失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+# 注意：/api/crawl/single-page 阻塞式接口已弃用
+# 请使用 /api/crawl/single-page/stream SSE 流式接口
+# 该接口使用后台线程执行，不会阻塞事件循环
 
 @app.get("/api/crawl/single-page/stream", summary="单页爬取实时日志流")
 async def crawl_single_page_stream(url: str):
@@ -1759,7 +1672,7 @@ async def crawl_single_page_stream(url: str):
                 }
                 log_queue.put(json.dumps(log_data))
 
-            # 在后台线程中执行爬取任务
+            # 在后台线程中执行爬取任务（使用线程池避免阻塞）
 
             def run_crawl():
                 try:
@@ -1767,10 +1680,10 @@ async def crawl_single_page_stream(url: str):
 
                     # 1. 扫描页面
                     from app.config.config_manager import config_manager
-                    
+
                     crawler_config_dict = config_manager.get_config('crawler')
                     firecrawl_config_dict = config_manager.get_config('firecrawl')
-                    
+
                     scanner = URLScanner(
                         timeout=crawler_config_dict.get('timeout', 30),
                         follow_redirects=True,
@@ -1917,15 +1830,18 @@ async def crawl_single_page_stream(url: str):
                     log_queue.put("ERROR")
                     logger.error(error_msg)
 
-            # 启动后台线程
             crawl_thread = Thread(target=run_crawl, daemon=True)
             crawl_thread.start()
 
             # 持续从队列读取并发送SSE事件
             while True:
                 try:
-                    # 非阻塞方式获取消息
-                    message = log_queue.get(timeout=1)
+                    # 在线程池中执行阻塞的队列读取操作
+                    loop = asyncio.get_event_loop()
+                    message = await loop.run_in_executor(
+                        None,  # 使用默认线程池
+                        lambda: log_queue.get(timeout=1)
+                    )
 
                     if message == "ERROR":
                         yield f"data: {json.dumps({'type': 'error', 'message': '爬取过程中发生错误'})}\n\n"
@@ -2116,7 +2032,7 @@ async def get_redis_config_api():
     try:
         from app.config.config_manager import config_manager
         redis_data = config_manager.get_config('redis')
-        
+
         return {
             "status": "success",
             "config": {
@@ -2393,12 +2309,12 @@ async def get_system_config():
 
         # 模型配置：从 llm.yaml 读取（包含 Rerank 配置）
         llm_config_data = config_manager.get_config('llm')
-        
+
         # 从嵌套结构中读取配置
         openai_config = llm_config_data.get('openai', {})
         embedding_config = llm_config_data.get('embedding', {})
         rerank_config_nested = llm_config_data.get('rerank', {})
-        
+
         llm_config = {
             "openai_api_key": openai_config.get('api_key', ''),
             "openai_api_base": openai_config.get('api_base', ''),
