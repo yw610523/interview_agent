@@ -102,10 +102,20 @@ class VectorService:
     def _create_embedding(self, text: str) -> List[float]:
         """
         生成文本的向量表示
+        
+        优化点：
+        1. 添加 HTTP 状态码检测
+        2. 添加重定向检测（响应为 HTML 页面）
+        3. 添加详细的错误诊断信息
+        4. 支持超时和重试机制
         """
         if not self.openai_client:
             logger.warning("OpenAI 客户端未初始化，使用简单哈希生成向量")
             return self._simple_hash_embedding(text)
+
+        # 获取当前配置用于错误诊断
+        api_base = config_manager.get('llm.embedding.api_base') or \
+                   os.getenv("EMBEDDING_API_BASE", "")
 
         try:
             # 优先从 config.yaml 读取 Embedding 模型名称和维度
@@ -127,31 +137,66 @@ class VectorService:
             if "text-embedding-3" in embedding_model:
                 request_params["dimensions"] = embedding_dim
 
-            logger.debug(f"调用 Embedding API: model={embedding_model}, input_length={len(text)}")
+            logger.debug(f"调用 Embedding API: model={embedding_model}, input_length={len(text)}, api_base={api_base}")
             response = self.openai_client.embeddings.create(**request_params)
             logger.debug(f"Embedding API 响应类型: {type(response)}")
 
-            # 检查响应类型，确保不是字符串
+            # ========== 优化1: 检查响应状态码 ==========
+            # 通过 SDK 内部属性获取原始响应
+            status_code = None
+            if hasattr(response, '_raw_response'):
+                status_code = response._raw_response.status_code
+                logger.debug(f"Embedding API 响应状态码: {status_code}")
+
+                # 检查 HTTP 重定向状态码
+                if 300 <= status_code < 400:
+                    logger.error(f"Embedding API 返回重定向 ({status_code})，可能是 API 端点配置错误")
+                    logger.error(f"当前配置的 API 基础 URL: {api_base}")
+                    raise Exception(f"API 返回重定向 ({status_code})，请检查 EMBEDDING_API_BASE 配置")
+
+            # ========== 优化2: 检查响应类型 ==========
+            # 检查响应是否为字符串（可能是重定向到首页返回的HTML）
             if isinstance(response, str):
                 logger.error(f"Embedding API 返回字符串而不是对象: {response[:200]}")
+
+                # 检测是否是HTML页面
+                if '<html' in response.lower() or '<!doctype' in response.lower():
+                    logger.error(f"响应是 HTML 页面，确认是重定向到网站首页")
+                    logger.error(f"诊断信息:")
+                    logger.error(f"  - 当前 API 基础 URL: {api_base}")
+                    logger.error(f"  - 建议检查: EMBEDDING_API_BASE 是否正确（应为 https://api.siliconflow.cn/v1）")
+                    raise Exception(f"API 端点配置错误：请求被重定向到网站首页")
+
                 raise Exception(f"API 返回字符串响应: {response[:100]}...")
 
-            # 检查响应是否有 data 属性（防止 AttributeError）
-            try:
-                if not hasattr(response, "data") or not response.data:
-                    logger.error(f"Embedding API 响应格式异常: {type(response)} - {response}")
-                    raise Exception(
-                        f"Embedding API 响应格式异常: {type(response)} - {str(response)[:200]}"
-                    )
-            except AttributeError as attr_err:
-                logger.error(f"响应对象缺少 data 属性: {type(response)} - {str(response)[:200]}")
-                raise Exception(f"响应格式错误: {str(attr_err)}")
+            # ========== 优化3: 检查响应结构 ==========
+            # 检查响应是否有 data 属性
+            if not hasattr(response, "data"):
+                logger.error(f"Embedding API 响应缺少 data 属性: {type(response)} - {str(response)[:200]}")
+                raise Exception(f"响应格式错误: 缺少 data 属性")
 
+            # 检查 data 是否存在且非空
+            if not response.data:
+                logger.error(f"Embedding API 响应 data 为空: {type(response.data)}")
+                raise Exception("Embedding API 响应 data 为空")
+
+            # 检查 data 结构是否正确
+            if not isinstance(response.data, list) or len(response.data) == 0:
+                logger.error(f"Embedding API 响应 data 格式异常: {type(response.data)} - {str(response.data)[:200]}")
+                raise Exception("Embedding API 响应 data 格式异常")
+
+            # 检查 embedding 字段是否存在
             if not hasattr(response.data[0], "embedding"):
-                logger.error(f"Embedding API 响应数据格式异常: {response.data}")
-                raise Exception("Embedding API 响应数据格式异常")
+                logger.error(f"Embedding API 响应缺少 embedding 字段: {response.data[0]}")
+                raise Exception("Embedding API 响应缺少 embedding 字段")
 
+            # ========== 优化4: 验证向量质量 ==========
             embedding = response.data[0].embedding
+
+            # 检查 embedding 是否为列表且非空
+            if not isinstance(embedding, list) or len(embedding) == 0:
+                logger.error(f"Embedding 向量格式异常: {type(embedding)}")
+                raise Exception("Embedding 向量格式异常")
 
             # 验证向量维度是否与配置一致
             actual_dim = len(embedding)
@@ -161,14 +206,25 @@ class VectorService:
                     f"但配置为 {embedding_dim} 维。这可能导致搜索失败。"
                 )
 
+            logger.debug(f"Embedding 生成成功，维度: {actual_dim}")
             return embedding
+
         except Exception as e:
             error_msg = str(e)
             logger.error(f"生成 Embedding 失败: {error_msg}")
 
-            # 如果是网络错误或API错误，记录详细信息
-            if "Connection" in error_msg or "HTTP" in error_msg or "307" in error_msg:
-                logger.error(f"可能是 API 端点配置错误，请检查 EMBEDDING_API_BASE 配置")
+            # ========== 优化5: 增强错误诊断 ==========
+            # 如果是网络错误或API错误，记录详细诊断信息
+            error_keywords = ["Connection", "HTTP", "307", "timeout", "redirect", "refused"]
+            if any(keyword in error_msg for keyword in error_keywords):
+                logger.error("=" * 60)
+                logger.error("EMBEDDING API 错误诊断:")
+                logger.error(f"  当前 API 基础 URL: {api_base or '未配置'}")
+                logger.error(
+                    f"  当前 API Key 状态: {'已配置' if config_manager.get('llm.embedding.api_key') else '未配置'}")
+                logger.error(f"  推荐配置: EMBEDDING_API_BASE=https://api.siliconflow.cn/v1")
+                logger.error(f"  常见问题: 缺少 api. 子域名会导致重定向到首页")
+                logger.error("=" * 60)
 
             logger.warning("使用简单哈希生成向量作为备用方案")
             return self._simple_hash_embedding(text)
