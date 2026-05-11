@@ -21,12 +21,7 @@ export const crawlerApi = {
     return apiClient.put(`/scheduler-config?hour=${hour}&minute=${minute}`)
   },
 
-  // 手动触发批量爬取（同步，会阻塞）
-  triggerCrawl() {
-    return apiClient.get('/crawl/run')
-  },
-
-  // 异步触发批量爬取（立即返回任务ID）
+  // 异步触发批量爬取（立即返回任务ID，支持并发）
   triggerCrawlAsync() {
     return apiClient.post('/crawl/run-async')
   },
