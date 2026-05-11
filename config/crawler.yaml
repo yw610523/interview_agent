@@ -8,7 +8,7 @@
 
 # Sitemap URL：要爬取的网站 sitemap 地址
 # 支持完整 URL 或域名（会自动补全为 https://domain/sitemap.xml）
-sitemap_url: javaguide.com
+sitemap_url:
 
 # 网站根路径前缀（Root URL）：
 # - 用于子目录部署的网站（如 WordPress、博客系统）
@@ -77,8 +77,8 @@ use_firecrawl: ${FIRECRAWL_ENABLED:-false}
 
 # URL 包含模式：只爬取匹配这些模式的 URL（空列表表示不过滤）
 # 示例：['/docs/*', '/api/*']
-url_include_patterns: []
+url_include_patterns: [ ]
 
 # URL 排除模式：跳过匹配这些模式的 URL
 # 示例：['/admin/*', '/private/*']
-url_exclude_patterns: []
+url_exclude_patterns: [ ]

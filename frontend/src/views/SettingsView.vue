@@ -9,11 +9,38 @@
             :wrapper-col="{ span: 18 }"
         >
           <a-form-item label="Sitemap URL" required>
-            <a-input v-model:value="crawlerConfig.sitemap_url" placeholder="例如: javaguide.cn"/>
+            <a-space style="width: 100%">
+              <a-input 
+                v-model:value="crawlerConfig.sitemap_url" 
+                placeholder="例如: javaguide.cn"
+                @blur="testSitemapUrl"
+                style="flex: 1"
+              />
+              <div v-if="sitemapTestStatus" style="min-width: 80px">
+                <a-tag v-if="sitemapTestStatus === 'success'" color="success">
+                  <CheckOutlined /> 可访问
+                </a-tag>
+                <a-tag v-else-if="sitemapTestStatus === 'error'" color="error">
+                  <CloseOutlined /> 无法访问
+                </a-tag>
+                <a-spin v-else-if="sitemapTestStatus === 'testing'" size="small" />
+              </div>
+              <a-button 
+                v-if="sitemapTestStatus === 'error'" 
+                size="small" 
+                @click="openUrlInBrowser(buildSitemapUrl())"
+              >
+                打开链接
+              </a-button>
+            </a-space>
           </a-form-item>
 
           <a-form-item label="根路径前缀">
-            <a-input v-model:value="crawlerConfig.root_url" placeholder="例如: /blog, /docs（留空表示根目录）"/>
+            <a-input 
+              v-model:value="crawlerConfig.root_url" 
+              placeholder="例如: /blog, /docs（留空表示根目录）"
+              @blur="testSitemapUrl"
+            />
           </a-form-item>
 
           <a-form-item label="超时时间(秒)">
@@ -74,7 +101,7 @@
                 :wrapper-col="{ span: 16 }"
             >
               <a-form-item label="API Key">
-                <a-input-password v-model:value="llmConfig.openai_api_key" placeholder="输入API Key"/>
+                <a-input v-model:value="llmConfig.openai_api_key" placeholder="输入API Key" type="password"/>
               </a-form-item>
 
               <a-form-item label="API Base URL">
@@ -131,7 +158,7 @@
               </a-form-item>
 
               <a-form-item label="API Key" v-if="llmConfig.rerank_enabled">
-                <a-input-password v-model:value="llmConfig.rerank_api_key" placeholder="留空则复用 LLM API Key"/>
+                <a-input v-model:value="llmConfig.rerank_api_key" placeholder="留空则复用 LLM API Key" type="password"/>
                 <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
                   如果留空，将使用 EMBEDDING_API_KEY 或 OPENAI_API_KEY
                 </div>
@@ -180,7 +207,7 @@
           </a-form-item>
 
           <a-form-item label="密码">
-            <a-input-password v-model:value="emailConfig.smtp_password" placeholder="SMTP密码或授权码"/>
+            <a-input v-model:value="emailConfig.smtp_password" placeholder="SMTP密码或授权码" type="password"/>
           </a-form-item>
 
           <a-form-item label="测试邮箱">
@@ -392,7 +419,7 @@ import {onMounted, ref} from 'vue'
 import {crawlerApi, promptsApi, systemConfigApi} from '../services'
 import {message, Modal} from 'ant-design-vue'
 import dayjs from 'dayjs'
-import {ReloadOutlined, SaveOutlined, UndoOutlined} from '@ant-design/icons-vue'
+import {CheckOutlined, CloseOutlined, ReloadOutlined, SaveOutlined, UndoOutlined} from '@ant-design/icons-vue'
 
 // 当前激活的tab
 const activeTab = ref('crawler')
@@ -512,6 +539,46 @@ const testingEmail = ref(false)
 const savingPrompts = ref(false)
 const savingContent = ref(false)
 
+// URL连通性检测状态
+const sitemapTestStatus = ref('') // '', 'testing', 'success', 'error'
+let sitemapTestTimer = null
+
+// 原始配置副本（用于对比变更）
+const originalConfigs = ref({
+  llm: null,
+  email: null,
+  redis: null
+})
+
+// 深拷贝函数
+const deepClone = (obj) => {
+  if (obj === null || typeof obj !== 'object') return obj
+  if (Array.isArray(obj)) return obj.map(item => deepClone(item))
+  const cloned = {}
+  for (const key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      cloned[key] = deepClone(obj[key])
+    }
+  }
+  return cloned
+}
+
+// 检测对象变更，只返回修改过的字段
+const getChangedFields = (current, original) => {
+  if (!original) return current // 如果没有原始值，返回全部
+  
+  const changes = {}
+  for (const key in current) {
+    if (current.hasOwnProperty(key)) {
+      // 深度比较
+      if (JSON.stringify(current[key]) !== JSON.stringify(original[key])) {
+        changes[key] = current[key]
+      }
+    }
+  }
+  return changes
+}
+
 // 加载系统配置
 const loadSystemConfig = async () => {
   try {
@@ -527,10 +594,6 @@ const loadSystemConfig = async () => {
       // 加载模型配置（包含 Rerank）
       if (config.llm) {
         llmConfig.value = config.llm
-        // 隐藏API Key的中间部分
-        if (llmConfig.value.openai_api_key && llmConfig.value.openai_api_key.length > 10) {
-          llmConfig.value.openai_api_key = llmConfig.value.openai_api_key
-        }
       }
 
       // 兼容旧的 Rerank 配置结构
@@ -539,10 +602,14 @@ const loadSystemConfig = async () => {
         llmConfig.value.rerank_model_name = config.rerank.model_name
       }
 
+      // 保存原始配置副本（用于后续对比变更）
+      originalConfigs.value.llm = deepClone(config.llm)
+
       // 加载邮件配置
       if (config.email) {
         emailConfig.value = config.email
-        // 不再隐藏密码，由 a-input-password 组件自动处理
+        // 保存原始配置副本（用于后续对比变更）
+        originalConfigs.value.email = deepClone(config.email)
       }
 
       // 加载定时任务配置
@@ -589,9 +656,22 @@ const saveCrawlerConfig = async () => {
 const saveLlmConfig = async () => {
   savingLlm.value = true
   try {
-    const res = await systemConfigApi.updateLlmConfig(llmConfig.value)
+    // 只发送变更的字段
+    const changedFields = getChangedFields(llmConfig.value, originalConfigs.value.llm)
+    
+    // 如果没有变更，提示用户
+    if (Object.keys(changedFields).length === 0) {
+      message.info('没有检测到配置变更')
+      return
+    }
+    
+    console.log('检测到变更的字段:', Object.keys(changedFields))
+    
+    const res = await systemConfigApi.updateLlmConfig(changedFields)
     if (res.status === 'success') {
       message.success('模型配置保存成功')
+      // 更新原始配置副本
+      originalConfigs.value.llm = deepClone(llmConfig.value)
     }
   } catch (error) {
     message.error('保存模型配置失败')
@@ -610,9 +690,22 @@ const saveEmailConfig = async () => {
 
   savingEmail.value = true
   try {
-    const res = await systemConfigApi.updateEmailConfig(emailConfig.value)
+    // 只发送变更的字段
+    const changedFields = getChangedFields(emailConfig.value, originalConfigs.value.email)
+    
+    // 如果没有变更，提示用户
+    if (Object.keys(changedFields).length === 0) {
+      message.info('没有检测到配置变更')
+      return
+    }
+    
+    console.log('检测到变更的字段:', Object.keys(changedFields))
+    
+    const res = await systemConfigApi.updateEmailConfig(changedFields)
     if (res.status === 'success') {
       message.success('邮件配置保存成功')
+      // 更新原始配置副本
+      originalConfigs.value.email = deepClone(emailConfig.value)
     }
   } catch (error) {
     message.error('保存邮件配置失败')
@@ -733,6 +826,66 @@ const saveContentConfig = async () => {
   } finally {
     savingContent.value = false
   }
+}
+
+// 构建完整的Sitemap URL（用于测试）
+const buildSitemapUrl = () => {
+  let url = crawlerConfig.value.sitemap_url
+  if (!url) return ''
+  
+  // 如果URL不包含协议，默认添加https://
+  if (!url.startsWith(('http://', 'https://'))) {
+    url = `https://${url}`
+  }
+  
+  // 添加根路径前缀
+  const rootUrl = crawlerConfig.value.root_url || ''
+  
+  // 添加sitemap.xml路径
+  return `${url}${rootUrl}/sitemap.xml`
+}
+
+// 测试Sitemap URL连通性
+const testSitemapUrl = async () => {
+  const sitemapUrl = buildSitemapUrl()
+  if (!sitemapUrl) {
+    sitemapTestStatus.value = ''
+    return
+  }
+  
+  // 防抖：清除之前的定时器
+  if (sitemapTestTimer) {
+    clearTimeout(sitemapTestTimer)
+  }
+  
+  // 延迟500ms后执行测试，避免频繁请求
+  sitemapTestTimer = setTimeout(async () => {
+    sitemapTestStatus.value = 'testing'
+    
+    try {
+      const res = await crawlerApi.testUrlConnectivity(sitemapUrl)
+      if (res.accessible) {
+        sitemapTestStatus.value = 'success'
+      } else {
+        sitemapTestStatus.value = 'error'
+      }
+    } catch (error) {
+      sitemapTestStatus.value = 'error'
+      console.error('测试URL连通性失败:', error)
+    }
+  }, 500)
+}
+
+// 在浏览器中打开URL
+const openUrlInBrowser = (url) => {
+  if (!url) return
+  
+  // 如果URL不包含协议，默认添加https://
+  if (!url.startsWith(('http://', 'https://'))) {
+    url = `https://${url}`
+  }
+  
+  window.open(url, '_blank')
 }
 
 onMounted(() => {

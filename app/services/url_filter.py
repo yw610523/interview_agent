@@ -63,8 +63,13 @@ class URLFilter:
         )
 
     def _compile_patterns(self, patterns: List[str]) -> List[re.Pattern]:
-        """
+        r"""
         编译正则表达式模式
+        
+        支持两种格式:
+        1. 路径前缀匹配(推荐): /ai, /ai/, /ai/* 都表示匹配 /ai 路径下的所有URL
+        2. 通配符模式: *.pdf, /docs/**/*.html
+        3. 正则表达式: \/ai\/.*, .*\.pdf$
 
         参数:
             patterns: 正则表达式字符串列表
@@ -75,9 +80,44 @@ class URLFilter:
         compiled = []
         for pattern in patterns:
             try:
-                compiled_pattern = re.compile(pattern, re.IGNORECASE)
+                # 检测是否为简单的路径前缀(如 /ai, /ai/, /docs)
+                # 特征: 以 / 开头,不包含通配符和复杂正则符号
+                is_simple_path = (
+                        pattern.startswith('/') and
+                        '*' not in pattern and
+                        not any(c in pattern for c in ['^', '$', '+', '?', '[', ']', '(', ')', '{', '}', '|'])
+                )
+
+                if is_simple_path:
+                    # 路径前缀匹配: /ai 或 /ai/ 都转换为 /ai(/.*)?$
+                    # 去除末尾的 /
+                    clean_path = pattern.rstrip('/')
+                    # 构建正则: 匹配URL中包含 /ai 后面跟 / 任意内容,或者就是 /ai 结尾
+                    # 使用 (?=/|\?|#|$) 确保匹配的是完整路径段
+                    regex_pattern = f"{clean_path}(/|\\?|#|$)"
+                    compiled_pattern = re.compile(regex_pattern, re.IGNORECASE)
+                    logger.debug(f"路径前缀转换: {pattern} -> {regex_pattern}")
+                elif '*' in pattern and not any(
+                        c in pattern for c in ['^', '$', '+', '?', '[', ']', '(', ')', '{', '}', '|', '\\']):
+                    # 通配符模式: 将 * 转换为 .*
+                    # 特殊处理: 如果模式以 /* 结尾(如 /ai/*),则也匹配不带子路径的情况
+                    regex_pattern = re.escape(pattern)
+                    regex_pattern = regex_pattern.replace(r'\*', '.*')
+
+                    # 如果原始模式是 /xxx/* 形式，让它也能匹配 /xxx 本身
+                    if pattern.endswith('/*'):
+                        base_path = pattern[:-2]  # 去掉 /*
+                        # 构建: /ai(/.*)?$ 的形式
+                        regex_pattern = f"{base_path}(/|\\?|#|$)"
+
+                    compiled_pattern = re.compile(regex_pattern, re.IGNORECASE)
+                    logger.debug(f"通配符模式转换: {pattern} -> {regex_pattern}")
+                else:
+                    # 直接使用正则表达式
+                    compiled_pattern = re.compile(pattern, re.IGNORECASE)
+                    logger.debug(f"编译正则表达式成功: {pattern}")
+
                 compiled.append(compiled_pattern)
-                logger.debug(f"编译正则表达式成功: {pattern}")
             except re.error as e:
                 logger.error(f"编译正则表达式失败: {pattern}, 错误: {str(e)}")
         return compiled

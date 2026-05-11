@@ -94,6 +94,35 @@ def _mask_sensitive(key: str, value: Any) -> str:
     return str(value)
 
 
+def _mask_sensitive_value(value: str) -> str:
+    """对敏感信息值进行脱敏处理（仅传入值）"""
+    if not value or value == "" or value.startswith("$"):
+        return "*** (未配置)"
+    return value[:4] + "***" + value[-4:] if len(value) > 8 else "***"
+
+
+def _is_masked_value(value: Any) -> bool:
+    """
+    检测值是否为脱敏后的假值
+    
+    Args:
+        value: 要检测的值
+        
+    Returns:
+        True 如果是脱敏值，False 如果是真实值
+    """
+    if value is None:
+        return True
+    val_str = str(value)
+    # 检查常见的占位符模式
+    if val_str == '' or val_str == '********' or val_str.startswith('***'):
+        return True
+    # 检查脱敏格式：包含 *** 的字符串
+    if '***' in val_str:
+        return True
+    return False
+
+
 @app.on_event("startup")
 async def startup_event():
     """启动时打印配置信息（脱敏）"""
@@ -305,6 +334,16 @@ def run_crawler() -> Dict[str, Any]:
         if not sitemap_url.startswith(('http://', 'https://')):
             sitemap_url = f"https://{sitemap_url}"
         
+        # 如果只是域名（没有路径），自动添加 sitemap.xml 路径
+        from urllib.parse import urlparse
+        parsed = urlparse(sitemap_url)
+        if not parsed.path or parsed.path == '/':
+            # 构建完整路径：root_url + sitemap_path
+            root_url = config.root_url.rstrip('/')
+            sitemap_path = config.sitemap_path if config.sitemap_path else '/sitemap.xml'
+            sitemap_url = f"{parsed.scheme}://{parsed.netloc}{root_url}{sitemap_path}"
+            logger.info(f"自动补全 Sitemap URL: {sitemap_url}")
+        
         # 检查robots.txt
         if config.check_robots_txt:
             robots_txt = scanner.check_robots_txt(sitemap_url, config.robots_path)
@@ -499,6 +538,16 @@ async def trigger_crawl_async():
                 if not sitemap_url.startswith(('http://', 'https://')):
                     sitemap_url = f"https://{sitemap_url}"
                 
+                # 如果只是域名（没有路径），自动添加 sitemap.xml 路径
+                from urllib.parse import urlparse
+                parsed = urlparse(sitemap_url)
+                if not parsed.path or parsed.path == '/':
+                    # 构建完整路径：root_url + sitemap_path
+                    root_url = config.root_url.rstrip('/')
+                    sitemap_path = config.sitemap_path if config.sitemap_path else '/sitemap.xml'
+                    sitemap_url = f"{parsed.scheme}://{parsed.netloc}{root_url}{sitemap_path}"
+                    logger.info(f"自动补全 Sitemap URL: {sitemap_url}")
+                
                 # 检查robots.txt
                 if config.check_robots_txt:
                     robots_txt = scanner.check_robots_txt(sitemap_url, config.robots_path)
@@ -508,9 +557,27 @@ async def trigger_crawl_async():
                             raise PermissionError("robots.txt 禁止爬取此网站")
                 
                 # 解析sitemap获取URL列表
+                logger.info(f"开始解析 Sitemap: {sitemap_url}")
                 parser = SitemapParser(sitemap_url)
-                parser.fetch_sitemap()
+                
+                try:
+                    parser.fetch_sitemap()
+                    logger.info("Sitemap 获取成功")
+                except Exception as e:
+                    logger.error(f"Sitemap 获取失败: {str(e)}")
+                    raise ValueError(f"无法获取 Sitemap: {str(e)}")
+                
                 urls = parser.parse()
+                logger.info(f"Sitemap 解析完成，共获取到 {len(urls)} 个 URL")
+                
+                if len(urls) == 0:
+                    logger.warning("Sitemap 中未找到任何 URL，请检查:")
+                    logger.warning(f"1. Sitemap URL 是否正确: {sitemap_url}")
+                    logger.warning(f"2. Sitemap 文件是否存在且可访问")
+                    logger.warning(f"3. Sitemap 格式是否正确（XML）")
+                    # 打印前几个URL样本用于调试
+                    if hasattr(parser, '_xml_content') and parser._xml_content:
+                        logger.warning(f"Sitemap 内容预览（前500字符）: {parser._xml_content[:500]}")
                 
                 # 应用URL过滤
                 from app.services.url_filter import URLFilter
@@ -2192,6 +2259,64 @@ async def get_crawler_config():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/config/test-url", summary="测试URL连通性")
+async def test_url_connectivity(url: str):
+    """
+    测试指定URL的连通性
+    
+    参数:
+        url: 要测试的URL地址
+    """
+    import urllib.request
+    import ssl
+    
+    try:
+        if not url:
+            raise HTTPException(status_code=400, detail="URL不能为空")
+        
+        # 如果URL不包含协议，默认添加https://
+        if not url.startswith(('http://', 'https://')):
+            url = f"https://{url}"
+        
+        # 创建SSL上下文（不验证证书以避免某些网站证书问题）
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        # 发送请求
+        req = urllib.request.Request(
+            url,
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        )
+        
+        response = urllib.request.urlopen(req, timeout=10, context=ssl_context)
+        status_code = response.getcode()
+        is_accessible = status_code < 400
+        
+        return {
+            "status": "success",
+            "url": url,
+            "accessible": is_accessible,
+            "status_code": status_code,
+            "message": "URL可访问" if is_accessible else f"URL返回状态码: {status_code}"
+        }
+    except urllib.error.HTTPError as e:
+        return {
+            "status": "success",
+            "url": url,
+            "accessible": False,
+            "status_code": e.code,
+            "message": f"URL返回状态码: {e.code}"
+        }
+    except urllib.error.URLError as e:
+        raise HTTPException(status_code=400, detail=f"无法访问URL: {str(e.reason)}")
+    except Exception as e:
+        logger.error(f"测试URL连通性失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
 @app.put("/api/config", summary="更新爬虫配置")
 async def update_crawler_config(config_data: Dict[str, Any]):
     """
@@ -2286,7 +2411,7 @@ async def update_llm_config(config_data: Dict[str, Any]):
         for key, value in config_data.items():
             if key in config_mapping:
                 yaml_key = config_mapping[key]
-                if value is not None and value != '' and value != '********':
+                if value is not None and value != '':
                     # 转换数字类型
                     if key in ['embedding_dimension', 'model_max_input_tokens', 'model_max_output_tokens']:
                         new_llm_config[yaml_key] = int(value)
@@ -2327,7 +2452,7 @@ async def get_redis_config_api():
             "config": {
                 "host": redis_data.get('host', 'localhost'),
                 "port": redis_data.get('port', 6379),
-                "password": redis_data.get('password', '')
+                "password": _mask_sensitive_value(redis_data.get('password', ''))
             }
         }
     except Exception as e:
@@ -2348,9 +2473,6 @@ async def update_redis_config(config_data: Dict[str, Any]):
         for key in ['host', 'port', 'password']:
             if key in config_data:
                 value = config_data[key]
-                # 跳过密码占位符
-                if key == 'password' and value == '********':
-                    continue
                 # 转换端口为整数
                 if key == 'port':
                     new_redis_config[key] = int(value)
@@ -2398,7 +2520,7 @@ async def update_email_config(config_data: Dict[str, Any]):
         for key, value in config_data.items():
             if key in email_mapping:
                 yaml_key = email_mapping[key]
-                if value is not None and value != '' and value != '********':
+                if value is not None and value != '':
                     # 转换端口为整数
                     if key == 'smtp_port':
                         new_smtp_config[yaml_key] = int(value)
@@ -2605,7 +2727,7 @@ async def get_system_config():
         rerank_config_nested = llm_config_data.get('rerank', {})
 
         llm_config = {
-            "openai_api_key": openai_config.get('api_key', ''),
+            "openai_api_key": _mask_sensitive_value(openai_config.get('api_key', '')),
             "openai_api_base": openai_config.get('api_base', ''),
             "openai_model": openai_config.get('model', 'gpt-4o-mini'),
             "openai_embedding_model": embedding_config.get('model', 'BAAI/bge-m3'),
@@ -2614,7 +2736,7 @@ async def get_system_config():
             "model_max_output_tokens": str(openai_config.get('max_output_tokens', '')),
             "rerank_enabled": rerank_config_nested.get('enabled', False),
             "rerank_model_name": rerank_config_nested.get('model', 'BAAI/bge-reranker-v2-m3'),
-            "rerank_api_key": rerank_config_nested.get('api_key', ''),
+            "rerank_api_key": _mask_sensitive_value(rerank_config_nested.get('api_key', '')),
             "rerank_api_base": rerank_config_nested.get('api_base', ''),
         }
 
@@ -2640,7 +2762,7 @@ async def get_system_config():
         redis_config = {
             "host": redis_config_data.get('host', 'localhost'),
             "port": redis_config_data.get('port', 6379),
-            "password": redis_config_data.get('password', ''),
+            "password": _mask_sensitive_value(redis_config_data.get('password', '')),
             "description": "Redis运行在Docker容器内，App自动连接"
         }
 
@@ -2650,7 +2772,7 @@ async def get_system_config():
             "smtp_server": smtp_config_data.get('server', ''),
             "smtp_port": smtp_config_data.get('port', 587),
             "smtp_user": smtp_config_data.get('user', ''),
-            "smtp_password": smtp_config_data.get('password', ''),
+            "smtp_password": _mask_sensitive_value(smtp_config_data.get('password', '')),
             "smtp_test_user": smtp_config_data.get('test_user', ''),
         }
 
@@ -2875,6 +2997,15 @@ def scheduled_crawl():
             if not sitemap_url.startswith(('http://', 'https://')):
                 sitemap_url = f"https://{sitemap_url}"
             
+            # 如果只是域名（没有路径），自动添加 sitemap.xml 路径
+            from urllib.parse import urlparse
+            parsed = urlparse(sitemap_url)
+            if not parsed.path or parsed.path == '/':
+                root_url = config.root_url.rstrip('/')
+                sitemap_path = config.sitemap_path if config.sitemap_path else '/sitemap.xml'
+                sitemap_url = f"{parsed.scheme}://{parsed.netloc}{root_url}{sitemap_path}"
+                logger.info(f"自动补全 Sitemap URL: {sitemap_url}")
+            
             if config.check_robots_txt:
                 robots_txt = scanner.check_robots_txt(sitemap_url, config.robots_path)
                 if robots_txt and 'Disallow: /' in robots_txt:
@@ -2963,6 +3094,36 @@ def scheduled_update_weights():
         logger.info(f"权重更新完成: 更新了 {updated_count} 个题目")
     except Exception as e:
         logger.error(f"定时权重更新任务失败: {str(e)}")
+
+
+@app.get("/api/crawl/test-sitemap", summary="测试 Sitemap 解析")
+async def test_sitemap(sitemap_url: str = Query(..., description="要测试的 Sitemap URL")):
+    """
+    测试 Sitemap 解析，返回解析结果和URL列表
+    
+    参数:
+        sitemap_url: 要测试的 Sitemap URL
+    """
+    try:
+        from app.services.sitemap_parser import SitemapParser
+        
+        logger.info(f"测试 Sitemap: {sitemap_url}")
+        
+        # 解析 sitemap
+        parser = SitemapParser(sitemap_url)
+        parser.fetch_sitemap()
+        urls = parser.parse()
+        
+        return {
+            "status": "success",
+            "sitemap_url": sitemap_url,
+            "total_urls": len(urls),
+            "sample_urls": urls[:10],  # 只返回前10个作为样本
+            "urls": urls if len(urls) <= 100 else urls[:100]  # 最多返回100个
+        }
+    except Exception as e:
+        logger.error(f"Sitemap 测试失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Sitemap 测试失败: {str(e)}")
 
 
 if __name__ == "__main__":

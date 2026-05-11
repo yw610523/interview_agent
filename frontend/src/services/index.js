@@ -11,6 +11,11 @@ export const crawlerApi = {
     return apiClient.put('/config', config)
   },
 
+  // 测试URL连通性
+  testUrlConnectivity(url) {
+    return apiClient.get('/config/test-url', { params: { url } })
+  },
+
   // 获取定时任务配置
   getSchedulerConfig() {
     return apiClient.get('/scheduler-config')
