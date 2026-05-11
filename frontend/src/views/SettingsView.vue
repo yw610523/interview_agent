@@ -9,11 +9,38 @@
             :wrapper-col="{ span: 18 }"
         >
           <a-form-item label="Sitemap URL" required>
-            <a-input v-model:value="crawlerConfig.sitemap_url" placeholder="例如: javaguide.cn"/>
+            <a-space style="width: 100%">
+              <a-input 
+                v-model:value="crawlerConfig.sitemap_url" 
+                placeholder="例如: javaguide.cn"
+                @blur="handleSitemapUrlBlur"
+                style="flex: 1"
+              />
+              <div v-if="sitemapTestStatus" style="min-width: 80px">
+                <a-tag v-if="sitemapTestStatus === 'success'" color="success">
+                  <CheckOutlined /> 可访问
+                </a-tag>
+                <a-tag v-else-if="sitemapTestStatus === 'error'" color="error">
+                  <CloseOutlined /> 无法访问
+                </a-tag>
+                <a-spin v-else-if="sitemapTestStatus === 'testing'" size="small" />
+              </div>
+              <a-button 
+                v-if="sitemapTestStatus === 'error'" 
+                size="small" 
+                @click="openUrlInBrowser(buildSitemapUrl())"
+              >
+                打开链接
+              </a-button>
+            </a-space>
           </a-form-item>
 
           <a-form-item label="根路径前缀">
-            <a-input v-model:value="crawlerConfig.root_url" placeholder="例如: /blog, /docs（留空表示根目录）"/>
+            <a-input 
+              v-model:value="crawlerConfig.root_url" 
+              placeholder="例如: /blog, /docs（留空表示根目录）"
+              @blur="handleRootUrlBlur"
+            />
           </a-form-item>
 
           <a-form-item label="超时时间(秒)">
@@ -33,20 +60,49 @@
           </a-form-item>
 
           <a-form-item label="URL包含规则">
-            <a-select
-                v-model:value="crawlerConfig.url_include_patterns"
-                mode="tags"
-                placeholder="输入URL包含模式，如: /docs/"
-                style="width: 100%"
+            <div v-if="loadingPaths" style="margin-bottom: 8px; color: #8c8c8c; font-size: 12px">
+              <a-spin size="small" /> 正在加载路径...
+            </div>
+            <div v-else-if="totalUrls" style="margin-bottom: 8px; color: #8c8c8c; font-size: 12px">
+              已加载 {{ totalUrls }} 个URL的路径结构
+            </div>
+            <a-tree
+              v-if="sitemapPaths.length > 0"
+              v-model:checkedKeys="crawlerConfig.url_include_patterns"
+              :tree-data="sitemapPaths"
+              checkable
+              :default-expand-all="false"
+              :max-height="300"
+              style="border: 1px solid #d9d9d9; border-radius: 4px; padding: 8px"
             />
+            <a-select
+              v-else
+              v-model:value="crawlerConfig.url_include_patterns"
+              mode="tags"
+              placeholder="手动输入路径模式，如: /docs/"
+              style="width: 100%"
+            />
+            <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px">
+              提示：选择的路径会自动添加 /* 通配符，匹配该路径下的所有URL
+            </div>
           </a-form-item>
 
           <a-form-item label="URL排除规则">
+            <a-tree
+              v-if="sitemapPaths.length > 0"
+              v-model:checkedKeys="crawlerConfig.url_exclude_patterns"
+              :tree-data="sitemapPaths"
+              checkable
+              :default-expand-all="false"
+              :max-height="300"
+              style="border: 1px solid #d9d9d9; border-radius: 4px; padding: 8px"
+            />
             <a-select
-                v-model:value="crawlerConfig.url_exclude_patterns"
-                mode="tags"
-                placeholder="输入URL排除模式，如: /admin/"
-                style="width: 100%"
+              v-else
+              v-model:value="crawlerConfig.url_exclude_patterns"
+              mode="tags"
+              placeholder="手动输入路径模式，如: /admin/"
+              style="width: 100%"
             />
           </a-form-item>
 
@@ -74,7 +130,7 @@
                 :wrapper-col="{ span: 16 }"
             >
               <a-form-item label="API Key">
-                <a-input-password v-model:value="llmConfig.openai_api_key" placeholder="输入API Key"/>
+                <a-input v-model:value="llmConfig.openai_api_key" placeholder="输入API Key" type="password"/>
               </a-form-item>
 
               <a-form-item label="API Base URL">
@@ -131,7 +187,7 @@
               </a-form-item>
 
               <a-form-item label="API Key" v-if="llmConfig.rerank_enabled">
-                <a-input-password v-model:value="llmConfig.rerank_api_key" placeholder="留空则复用 LLM API Key"/>
+                <a-input v-model:value="llmConfig.rerank_api_key" placeholder="留空则复用 LLM API Key" type="password"/>
                 <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
                   如果留空，将使用 EMBEDDING_API_KEY 或 OPENAI_API_KEY
                 </div>
@@ -180,7 +236,7 @@
           </a-form-item>
 
           <a-form-item label="密码">
-            <a-input-password v-model:value="emailConfig.smtp_password" placeholder="SMTP密码或授权码"/>
+            <a-input v-model:value="emailConfig.smtp_password" placeholder="SMTP密码或授权码" type="password"/>
           </a-form-item>
 
           <a-form-item label="测试邮箱">
@@ -388,11 +444,11 @@
 </template>
 
 <script setup>
-import {onMounted, ref} from 'vue'
+import {onMounted, ref, watch} from 'vue'
 import {crawlerApi, promptsApi, systemConfigApi} from '../services'
 import {message, Modal} from 'ant-design-vue'
 import dayjs from 'dayjs'
-import {ReloadOutlined, SaveOutlined, UndoOutlined} from '@ant-design/icons-vue'
+import {CheckOutlined, CloseOutlined, ReloadOutlined, SaveOutlined, UndoOutlined} from '@ant-design/icons-vue'
 
 // 当前激活的tab
 const activeTab = ref('crawler')
@@ -512,6 +568,51 @@ const testingEmail = ref(false)
 const savingPrompts = ref(false)
 const savingContent = ref(false)
 
+// URL连通性检测状态
+const sitemapTestStatus = ref('') // '', 'testing', 'success', 'error'
+let sitemapTestTimer = null
+
+// Sitemap路径树相关
+const sitemapPaths = ref([])
+const totalUrls = ref(0)
+const loadingPaths = ref(false)
+
+// 原始配置副本（用于对比变更）
+const originalConfigs = ref({
+  llm: null,
+  email: null,
+  redis: null
+})
+
+// 深拷贝函数
+const deepClone = (obj) => {
+  if (obj === null || typeof obj !== 'object') return obj
+  if (Array.isArray(obj)) return obj.map(item => deepClone(item))
+  const cloned = {}
+  for (const key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      cloned[key] = deepClone(obj[key])
+    }
+  }
+  return cloned
+}
+
+// 检测对象变更，只返回修改过的字段
+const getChangedFields = (current, original) => {
+  if (!original) return current // 如果没有原始值，返回全部
+  
+  const changes = {}
+  for (const key in current) {
+    if (current.hasOwnProperty(key)) {
+      // 深度比较
+      if (JSON.stringify(current[key]) !== JSON.stringify(original[key])) {
+        changes[key] = current[key]
+      }
+    }
+  }
+  return changes
+}
+
 // 加载系统配置
 const loadSystemConfig = async () => {
   try {
@@ -527,10 +628,6 @@ const loadSystemConfig = async () => {
       // 加载模型配置（包含 Rerank）
       if (config.llm) {
         llmConfig.value = config.llm
-        // 隐藏API Key的中间部分
-        if (llmConfig.value.openai_api_key && llmConfig.value.openai_api_key.length > 10) {
-          llmConfig.value.openai_api_key = llmConfig.value.openai_api_key
-        }
       }
 
       // 兼容旧的 Rerank 配置结构
@@ -539,10 +636,14 @@ const loadSystemConfig = async () => {
         llmConfig.value.rerank_model_name = config.rerank.model_name
       }
 
+      // 保存原始配置副本（用于后续对比变更）
+      originalConfigs.value.llm = deepClone(config.llm)
+
       // 加载邮件配置
       if (config.email) {
         emailConfig.value = config.email
-        // 不再隐藏密码，由 a-input-password 组件自动处理
+        // 保存原始配置副本（用于后续对比变更）
+        originalConfigs.value.email = deepClone(config.email)
       }
 
       // 加载定时任务配置
@@ -589,9 +690,22 @@ const saveCrawlerConfig = async () => {
 const saveLlmConfig = async () => {
   savingLlm.value = true
   try {
-    const res = await systemConfigApi.updateLlmConfig(llmConfig.value)
+    // 只发送变更的字段
+    const changedFields = getChangedFields(llmConfig.value, originalConfigs.value.llm)
+    
+    // 如果没有变更，提示用户
+    if (Object.keys(changedFields).length === 0) {
+      message.info('没有检测到配置变更')
+      return
+    }
+    
+    console.log('检测到变更的字段:', Object.keys(changedFields))
+    
+    const res = await systemConfigApi.updateLlmConfig(changedFields)
     if (res.status === 'success') {
       message.success('模型配置保存成功')
+      // 更新原始配置副本
+      originalConfigs.value.llm = deepClone(llmConfig.value)
     }
   } catch (error) {
     message.error('保存模型配置失败')
@@ -610,9 +724,22 @@ const saveEmailConfig = async () => {
 
   savingEmail.value = true
   try {
-    const res = await systemConfigApi.updateEmailConfig(emailConfig.value)
+    // 只发送变更的字段
+    const changedFields = getChangedFields(emailConfig.value, originalConfigs.value.email)
+    
+    // 如果没有变更，提示用户
+    if (Object.keys(changedFields).length === 0) {
+      message.info('没有检测到配置变更')
+      return
+    }
+    
+    console.log('检测到变更的字段:', Object.keys(changedFields))
+    
+    const res = await systemConfigApi.updateEmailConfig(changedFields)
     if (res.status === 'success') {
       message.success('邮件配置保存成功')
+      // 更新原始配置副本
+      originalConfigs.value.email = deepClone(emailConfig.value)
     }
   } catch (error) {
     message.error('保存邮件配置失败')
@@ -735,9 +862,257 @@ const saveContentConfig = async () => {
   }
 }
 
+// 构建完整的Sitemap URL（用于测试）
+const buildSitemapUrl = () => {
+  let url = crawlerConfig.value.sitemap_url
+  if (!url) return ''
+  
+  // 如果URL不包含协议，默认添加https://
+  if (!url.startsWith(('http://', 'https://'))) {
+    url = `https://${url}`
+  }
+  
+  // 添加根路径前缀
+  const rootUrl = crawlerConfig.value.root_url || ''
+  
+  // 添加sitemap.xml路径
+  return `${url}${rootUrl}/sitemap.xml`
+}
+
+// 测试Sitemap URL连通性（内部方法，无防抖）
+const testSitemapUrlInternal = async () => {
+  const sitemapUrl = buildSitemapUrl()
+  if (!sitemapUrl) {
+    sitemapTestStatus.value = ''
+    return false
+  }
+  
+  sitemapTestStatus.value = 'testing'
+  
+  try {
+    const res = await crawlerApi.testUrlConnectivity(sitemapUrl)
+    if (res.accessible) {
+      sitemapTestStatus.value = 'success'
+      return true
+    } else {
+      sitemapTestStatus.value = 'error'
+      return false
+    }
+  } catch (error) {
+    sitemapTestStatus.value = 'error'
+    console.error('测试URL连通性失败:', error)
+    return false
+  }
+}
+
+// 测试Sitemap URL连通性（带防抖，用于实时输入）
+const testSitemapUrl = async () => {
+  const sitemapUrl = buildSitemapUrl()
+  if (!sitemapUrl) {
+    sitemapTestStatus.value = ''
+    return
+  }
+  
+  // 防抖：清除之前的定时器
+  if (sitemapTestTimer) {
+    clearTimeout(sitemapTestTimer)
+  }
+  
+  // 延迟500ms后执行测试，避免频繁请求
+  sitemapTestTimer = setTimeout(async () => {
+    sitemapTestStatus.value = 'testing'
+    
+    try {
+      const res = await crawlerApi.testUrlConnectivity(sitemapUrl)
+      if (res.accessible) {
+        sitemapTestStatus.value = 'success'
+      } else {
+        sitemapTestStatus.value = 'error'
+      }
+    } catch (error) {
+      sitemapTestStatus.value = 'error'
+      console.error('测试URL连通性失败:', error)
+    }
+  }, 500)
+}
+
+// Sitemap URL失去焦点时：测试连通性 + 加载路径树
+const handleSitemapUrlBlur = async () => {
+  // 先测试连通性（无防抖，立即执行）
+  const accessible = await testSitemapUrlInternal()
+  
+  // 如果连通性测试通过，加载路径树
+  if (accessible) {
+    await loadSitemapPaths()
+  }
+}
+
+// 根路径失去焦点时：重新加载路径树
+const handleRootUrlBlur = async () => {
+  // 重新测试连通性（root_url变化后完整URL也变了）
+  const accessible = await testSitemapUrlInternal()
+  
+  // 如果连通性测试通过，加载路径树
+  if (accessible) {
+    await loadSitemapPaths()
+  }
+}
+
+// 在浏览器中打开URL
+const openUrlInBrowser = (url) => {
+  if (!url) return
+  
+  // 如果URL不包含协议，默认添加https://
+  if (!url.startsWith(('http://', 'https://'))) {
+    url = `https://${url}`
+  }
+  
+  window.open(url, '_blank')
+}
+
+// 递归解码路径树中的 title（用于展示）
+const decodePathTree = (nodes) => {
+  if (!nodes) return []
+  
+  return nodes.map(node => {
+    const decodedNode = { ...node }
+    try {
+      // 解码 title，保留原始 key 不变
+      if (node.title) {
+        decodedNode.title = decodeURIComponent(node.title)
+      }
+    } catch (e) {
+      // 解码失败时保留原样
+      console.warn('路径解码失败:', node.title, e)
+    }
+    
+    // 递归处理子节点
+    if (node.children && node.children.length > 0) {
+      decodedNode.children = decodePathTree(node.children)
+    }
+    
+    return decodedNode
+  })
+}
+
+// 加载Sitemap路径树
+const loadSitemapPaths = async () => {
+  // 如果没有配置sitemap_url，不加载
+  if (!crawlerConfig.value.sitemap_url) {
+    sitemapPaths.value = []
+    totalUrls.value = 0
+    return
+  }
+  
+  loadingPaths.value = true
+  try {
+    // 传递当前输入框的值（而不是已保存的配置）
+    const res = await crawlerApi.getSitemapPaths(
+      crawlerConfig.value.sitemap_url,
+      crawlerConfig.value.root_url
+    )
+    console.log('Sitemap API响应:', res)
+    if (res.status === 'success') {
+      let paths = res.paths || []
+      totalUrls.value = res.total_urls || 0
+      
+      console.log('原始路径数据:', paths)
+      console.log('总URL数:', totalUrls.value)
+      
+      // 解码中文路径（用于界面展示）
+      paths = decodePathTree(paths)
+      console.log('解码后路径数据:', paths)
+      
+      // 如果配置了root_url，过滤路径树
+      const rootUrl = crawlerConfig.value.root_url
+      if (rootUrl && rootUrl.trim()) {
+        const normalizedRoot = rootUrl.startsWith('/') ? rootUrl : '/' + rootUrl
+        console.log('应用root_url过滤:', normalizedRoot)
+        paths = filterPathsByRoot(paths, normalizedRoot)
+        console.log('过滤后路径数据:', paths)
+      }
+      
+      sitemapPaths.value = paths
+      
+      if (sitemapPaths.value.length === 0 && totalUrls.value > 0) {
+        message.info('Sitemap已解析，但未发现可过滤的路径')
+      }
+    }
+  } catch (error) {
+    console.error('加载路径失败:', error)
+    // URL无法访问时，清空include和exclude
+    crawlerConfig.value.url_include_patterns = []
+    crawlerConfig.value.url_exclude_patterns = []
+    sitemapPaths.value = []
+    totalUrls.value = 0
+    message.warning('无法访问Sitemap，已清空URL过滤规则')
+  } finally {
+    loadingPaths.value = false
+  }
+}
+
+// 根据root_url过滤路径树
+const filterPathsByRoot = (paths, rootPath) => {
+  const filtered = []
+  
+  for (const path of paths) {
+    // 如果当前路径以rootPath开头
+    if (path.key === rootPath || path.key.startsWith(rootPath + '/')) {
+      // 复制节点
+      const node = { ...path }
+      
+      // 如果有子节点，递归过滤
+      if (node.children && node.children.length > 0) {
+        node.children = filterPathsByRoot(node.children, rootPath)
+      }
+      
+      // 如果是rootPath本身或者是其子路径，添加到结果
+      filtered.push(node)
+    }
+  }
+  
+  return filtered
+}
+
+// 监听sitemap_url和root_url变化，自动刷新路径树
+let refreshTimer = null
+let isInitialLoad = true  // 标记是否正在初始化加载
+// 注意：已移除实时 watch 监听，改为在 blur 事件中触发，避免输入过程中频繁请求
+
+// 清理不符合root_url的过滤规则
+const cleanupFilterRules = (rootUrl) => {
+  if (!rootUrl || !rootUrl.trim()) return
+  
+  const normalizedRoot = rootUrl.startsWith('/') ? rootUrl : '/' + rootUrl
+  
+  // 过滤include_patterns
+  const oldInclude = crawlerConfig.value.url_include_patterns || []
+  crawlerConfig.value.url_include_patterns = oldInclude.filter(pattern => {
+    // 如果pattern以rootPath开头或者是其子路径，保留
+    return pattern === normalizedRoot || pattern.startsWith(normalizedRoot + '/')
+  })
+  
+  // 过滤exclude_patterns
+  const oldExclude = crawlerConfig.value.url_exclude_patterns || []
+  crawlerConfig.value.url_exclude_patterns = oldExclude.filter(pattern => {
+    return pattern === normalizedRoot || pattern.startsWith(normalizedRoot + '/')
+  })
+  
+  // 如果有规则被清理，提示用户
+  if (oldInclude.length !== crawlerConfig.value.url_include_patterns.length ||
+      oldExclude.length !== crawlerConfig.value.url_exclude_patterns.length) {
+    message.info('已根据新的根路径清理过滤规则')
+  }
+}
+
 onMounted(() => {
   loadSystemConfig()
   loadPromptsConfig()
+  // 延迟加载路径树，确保配置已加载
+  setTimeout(() => {
+    isInitialLoad = false  // 初始化完成，允许 watch 监听
+    loadSitemapPaths()
+  }, 500)
 })
 </script>
 

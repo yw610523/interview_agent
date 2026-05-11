@@ -119,15 +119,28 @@ vim .env.firecrawl
 ### 爬虫
 
 ```bash
-# 手动触发爬取
-curl http://localhost:8000/crawl/run
+# 异步批量爬取（唯一方式，支持并发）
+curl -X POST http://localhost:8000/api/crawl/run-async
+
+# 批量爬取指定URL列表（并发执行）
+curl -X POST "http://localhost:8000/api/crawl/batch-urls" \
+  -H "Content-Type: application/json" \
+  -d '{"urls": ["https://example.com/page1", "https://example.com/page2"], "max_workers": 5}'
 
 # 智能爬取单页
 curl -X POST "http://localhost:8000/crawl/single-page?url=https://example.com/docs"
 
 # 查看爬取状态
 curl http://localhost:8000/crawl/status
+
+# 查询任务状态
+curl http://localhost:8000/api/crawl/task/{task_id}
+
+# 停止任务
+curl -X POST http://localhost:8000/api/crawl/task/{task_id}/stop
 ```
+
+**所有爬取接口都使用多线程并发执行**，性能提升5倍以上。单个URL失败不影响其他URL。详见 [异步批量爬取文档](docs/ASYNC_BATCH_CRAWL.md)
 
 ### 面试题
 
@@ -185,6 +198,8 @@ curl -X PUT http://localhost:8000/api/config \
 |-------------------------------|------|-----------------------|
 | **docs/DEVELOPMENT.md**       | 开发者  | 架构设计、核心模块、扩展指南、测试     |
 | **docs/README_CRAWLER.md**    | 所有人  | 爬虫详细使用说明              |
+| **docs/ASYNC_BATCH_CRAWL.md** | 开发者  | 异步批量爬取功能说明            |
+| **docs/BATCH_CRAWL_REFACTOR_SUMMARY.md** | 开发者 | 批量爬取改造总结 |
 | **docs/SYSTEM_SETTINGS.md**   | 所有人  | 系统设置功能说明              |
 | **deploy/DEPLOYMENT.md**      | 运维   | Docker 部署完整指南         |
 | **deploy/FIRECRAWL_DEPLOY.md**| 运维   | Firecrawl 快速部署指南      |
@@ -203,6 +218,9 @@ python -m tests.test_url_filter
 
 # 爬虫测试
 pytest tests/test_sitemap_crawler.py -v
+
+# 异步批量爬虫测试（新增）
+pytest tests/test_async_batch_crawler.py -v
 ```
 
 ---

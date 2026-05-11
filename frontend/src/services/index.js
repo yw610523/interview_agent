@@ -11,6 +11,19 @@ export const crawlerApi = {
     return apiClient.put('/config', config)
   },
 
+  // 测试URL连通性
+  testUrlConnectivity(url) {
+    return apiClient.get('/config/test-url', { params: { url } })
+  },
+
+  // 获取Sitemap路径树
+  getSitemapPaths(sitemapUrl, rootUrl) {
+    const params = {}
+    if (sitemapUrl) params.sitemap_url = sitemapUrl
+    if (rootUrl) params.root_url = rootUrl
+    return apiClient.get('/config/sitemap-paths', { params })
+  },
+
   // 获取定时任务配置
   getSchedulerConfig() {
     return apiClient.get('/scheduler-config')
@@ -21,12 +34,7 @@ export const crawlerApi = {
     return apiClient.put(`/scheduler-config?hour=${hour}&minute=${minute}`)
   },
 
-  // 手动触发批量爬取（同步，会阻塞）
-  triggerCrawl() {
-    return apiClient.get('/crawl/run')
-  },
-
-  // 异步触发批量爬取（立即返回任务ID）
+  // 异步触发批量爬取（立即返回任务ID，支持并发）
   triggerCrawlAsync() {
     return apiClient.post('/crawl/run-async')
   },

@@ -1,3 +1,4 @@
+.idea/
 .env
 .env.template
 .pytest_cache

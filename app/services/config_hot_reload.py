@@ -202,21 +202,21 @@ class ConfigHotReloadManager:
         try:
             logger.info(f"开始热加载定时任务配置: {new_hour}:{new_minute:02d}...")
 
-            # 移除旧的定时任务
+            # 更新定时任务的触发时间（不重新定义函数）
+            from apscheduler.triggers.cron import CronTrigger
+            
             jobs = scheduler.get_jobs()
+            updated = False
             for job in jobs:
                 if job.name == 'scheduled_crawl':
-                    scheduler.remove_job(job.id)
-                    logger.info(f"已移除旧定时任务: {job.id}")
-
-            # 添加新的定时任务
-            from apscheduler.triggers.cron import CronTrigger
-
-            @scheduler.scheduled_job(CronTrigger(hour=new_hour, minute=new_minute), name='scheduled_crawl')
-            def new_scheduled_crawl():
-                """新的定时爬虫任务"""
-                from app.main import run_crawler
-                run_crawler()
+                    # 只修改触发器，保留原有的任务函数
+                    job.modify(trigger=CronTrigger(hour=new_hour, minute=new_minute))
+                    logger.info(f"已更新定时任务触发时间: {new_hour}:{new_minute:02d}")
+                    updated = True
+                    break
+            
+            if not updated:
+                logger.warning("未找到名为 'scheduled_crawl' 的定时任务")
 
             logger.info(f"✅ 定时任务已更新为每天 {new_hour}:{new_minute:02d} 执行")
 
