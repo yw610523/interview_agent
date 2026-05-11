@@ -7,6 +7,7 @@ emails  # 用于发送邮件
 requests  # 用于 HTTP 请求
 beautifulsoup4  # 用于解析 HTML
 lxml  # 用于解析 XML sitemap
+ultimate-sitemap-parser  # Sitemap 解析库（自动处理嵌套索引和命名空间）
 python-dotenv
 pytest 
 httpx  # 用于异步 HTTP 请求（Firecrawl MCP）

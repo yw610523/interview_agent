@@ -16,6 +16,14 @@ export const crawlerApi = {
     return apiClient.get('/config/test-url', { params: { url } })
   },
 
+  // 获取Sitemap路径树
+  getSitemapPaths(sitemapUrl, rootUrl) {
+    const params = {}
+    if (sitemapUrl) params.sitemap_url = sitemapUrl
+    if (rootUrl) params.root_url = rootUrl
+    return apiClient.get('/config/sitemap-paths', { params })
+  },
+
   // 获取定时任务配置
   getSchedulerConfig() {
     return apiClient.get('/scheduler-config')

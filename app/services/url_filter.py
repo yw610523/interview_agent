@@ -80,6 +80,9 @@ class URLFilter:
         compiled = []
         for pattern in patterns:
             try:
+                # 保持原始格式（编码），与 sitemap URL 格式一致
+                # 这样可以直接匹配，无需解码，保证与缓存 key 逻辑一致
+                
                 # 检测是否为简单的路径前缀(如 /ai, /ai/, /docs)
                 # 特征: 以 / 开头,不包含通配符和复杂正则符号
                 is_simple_path = (
@@ -132,29 +135,28 @@ class URLFilter:
         返回:
             True表示应该爬取，False表示应该跳过
         """
-        # 对URL进行解码，支持中文匹配
-        # 例如: /%E9%9D%A2%E8%AF%95 -> /面试
-        decoded_url = unquote(url)
-
+        # 使用原始 URL 格式（编码），与 include_patterns 保持一致
+        # 避免解码带来的格式不一致问题
+        
         # 首先检查exclude规则
         if self.compiled_exclude:
             for pattern in self.compiled_exclude:
-                if pattern.search(decoded_url):
-                    logger.debug(f"URL被exclude规则排除: {url} (解码: {decoded_url}), 匹配模式: {pattern.pattern}")
+                if pattern.search(url):
+                    logger.debug(f"URL被exclude规则排除: {url}, 匹配模式: {pattern.pattern}")
                     return False
 
         # 然后检查include规则
         if self.compiled_include:
             for pattern in self.compiled_include:
-                if pattern.search(decoded_url):
-                    logger.debug(f"URL匹配include规则: {url} (解码: {decoded_url}), 匹配模式: {pattern.pattern}")
+                if pattern.search(url):
+                    logger.debug(f"URL匹配include规则: {url}, 匹配模式: {pattern.pattern}")
                     return True
             # 如果有include规则但没有匹配，返回False
-            logger.debug(f"URL未匹配任何include规则: {url} (解码: {decoded_url})")
+            logger.debug(f"URL未匹配任何include规则: {url}")
             return False
 
         # 如果没有include规则，默认允许
-        logger.debug(f"URL通过过滤（无include限制）: {url} (解码: {decoded_url})")
+        logger.debug(f"URL通过过滤（无include限制）: {url}")
         return True
 
     def filter_urls(self, urls: List[str]) -> List[str]:

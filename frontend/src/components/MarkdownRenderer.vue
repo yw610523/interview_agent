@@ -1,11 +1,12 @@
 <template>
-  <div class="markdown-renderer" v-html="renderedHtml"></div>
+  <div class="markdown-renderer" ref="containerRef" v-html="renderedHtml"></div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
+import mermaid from 'mermaid'
 import 'highlight.js/styles/github.css'
 
 const props = defineProps({
@@ -15,13 +16,27 @@ const props = defineProps({
   }
 })
 
-// 初始化 markdown-it，配置代码高亮
+const containerRef = ref(null)
+
+// 初始化 mermaid
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'default',
+  securityLevel: 'loose',
+})
+
+// 初始化 markdown-it，配置代码高亮和 Mermaid 支持
 const md = new MarkdownIt({
   html: true,
   linkify: true,
   typographer: true,
   breaks: true,  // 支持换行符转换为 <br>
   highlight: function (str, lang) {
+    // 如果是 mermaid 代码块，返回特殊容器（使用 escapeHtml 确保安全）
+    if (lang === 'mermaid') {
+      return `<div class="mermaid">${md.utils.escapeHtml(str)}</div>`
+    }
+    
     if (lang && hljs.getLanguage(lang)) {
       try {
         return '<pre class="hljs"><code>' +
@@ -48,6 +63,48 @@ const renderedHtml = computed(() => {
   return md.render(content)
 })
 
+// 渲染 Mermaid 图表
+const renderMermaid = async () => {
+  if (!containerRef.value) return
+  
+  try {
+    // 找到所有待渲染的 mermaid 节点
+    const elements = containerRef.value.querySelectorAll('.mermaid')
+    if (elements.length === 0) return
+
+    for (const el of elements) {
+      // 跳过已经渲染过的（带有 data-processed 属性）
+      if (el.getAttribute('data-processed')) continue
+      
+      const content = el.textContent.trim()
+      if (!content) continue
+      
+      const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`
+      
+      try {
+        // 使用 mermaid.render 渲染
+        const { svg } = await mermaid.render(id, content)
+        el.innerHTML = svg
+        el.setAttribute('data-processed', 'true')
+      } catch (error) {
+        console.error('Mermaid 语法错误:', error)
+        el.innerHTML = `<pre style="color:red">Error: ${error.message}</pre>`
+      }
+    }
+  } catch (error) {
+    console.error('Mermaid 渲染失败:', error)
+  }
+}
+
+// 监听内容变化
+watch(() => props.content, async () => {
+  await nextTick()
+  // 延迟一小会儿确保 v-html 已经完全挂载到 DOM
+  setTimeout(() => {
+    renderMermaid()
+  }, 0)
+}, { immediate: true })
+
 // 自动格式化纯文本为基本 Markdown
 const autoFormatPlainText = (text) => {
   // 1. 将明显的标题转换为 Markdown 标题
@@ -56,7 +113,9 @@ const autoFormatPlainText = (text) => {
   text = text.replace(/^([一二三四五六七八九十]+、)(.+)$/gm, '## $2')
   
   // 2. 确保段落之间有空行（单个换行符转换为双换行）
-  text = text.replace(/\n([^\n])/g, '\n\n$1')
+  const newline = String.fromCharCode(10) // \n
+  const regex = new RegExp(newline + '([^' + newline + '])', 'g')
+  text = text.replace(regex, newline + newline + '$1')
   
   return text
 }
@@ -142,6 +201,17 @@ const autoFormatPlainText = (text) => {
   font-size: 100%;
   background-color: transparent;
   border-radius: 0;
+}
+
+/* Mermaid 图表容器样式 */
+.markdown-renderer :deep(.mermaid) {
+  display: flex;
+  justify-content: center;
+  margin: 16px 0;
+  padding: 16px;
+  background-color: #f6f8fa;
+  border-radius: 6px;
+  overflow-x: auto;
 }
 
 /* 引用块样式 */

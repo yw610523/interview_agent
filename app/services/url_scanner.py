@@ -131,17 +131,22 @@ class URLScanner:
 
         try:
             # 如果启用了 Firecrawl，优先使用 Firecrawl
-            logger.info(f"URLScanner配置: use_firecrawl={self.use_firecrawl}, firecrawl_api_url={self.firecrawl_api_url}")
-            if self.use_firecrawl:
+            logger.info(
+                f"URLScanner配置: use_firecrawl={self.use_firecrawl}, firecrawl_api_url={self.firecrawl_api_url}")
+            if self.use_firecrawl and self.firecrawl_api_url:
                 logger.info(f"使用 Firecrawl 爬取页面: {url}")
                 firecrawl_result = self._scan_with_firecrawl(url)
 
                 if firecrawl_result.success:
                     logger.info(f"Firecrawl 爬取成功: {firecrawl_result.title}")
+
                     result.status_code = 200
                     result.title = firecrawl_result.title
                     result.html_content = firecrawl_result.html or ""
-                    result.text_content = firecrawl_result.markdown or ""
+
+                    # 直接使用 Markdown 内容
+                    markdown_content = firecrawl_result.markdown or ""
+                    result.text_content = markdown_content
                     result.word_count = len(result.text_content.split())
                     result.content_type = firecrawl_result.content_type or "text/html"
                     result.load_time = time.time() - start_time
@@ -308,6 +313,56 @@ class URLScanner:
             if href not in result.links["stylesheets"]:
                 result.links["stylesheets"].append(href)
 
+    def _convert_relative_urls(self, markdown_content: str, base_url: str) -> str:
+        """
+        将 Markdown 内容中的相对 URL 转换为绝对 URL
+
+        参数:
+            markdown_content: Markdown 格式的内容
+            base_url: 基础 URL，用于解析相对路径
+
+        返回:
+            转换后的 Markdown 内容
+        """
+        import re
+        from urllib.parse import urljoin
+
+        # 匹配 Markdown 图片语法: ![alt](url)
+        def replace_image_url(match):
+            alt_text = match.group(1)
+            img_url = match.group(2)
+
+            # 如果已经是绝对 URL，不处理
+            if img_url.startswith(('http://', 'https://', 'data:')):
+                return match.group(0)
+
+            # 转换为绝对 URL
+            absolute_url = urljoin(base_url, img_url)
+            logger.debug(f"转换图片URL: {img_url} -> {absolute_url}")
+            return f'![{alt_text}]({absolute_url})'
+
+        # 替换图片 URL
+        markdown_content = re.sub(r'!\[(.*?)\]\(([^)]+)\)', replace_image_url, markdown_content)
+
+        # 匹配 Markdown 链接语法: [text](url)
+        def replace_link_url(match):
+            link_text = match.group(1)
+            link_url = match.group(2)
+
+            # 如果已经是绝对 URL 或锚点，不处理
+            if link_url.startswith(('http://', 'https://', '#', 'mailto:', 'tel:')):
+                return match.group(0)
+
+            # 转换为绝对 URL
+            absolute_url = urljoin(base_url, link_url)
+            logger.debug(f"转换链接URL: {link_url} -> {absolute_url}")
+            return f'[{link_text}]({absolute_url})'
+
+        # 替换链接 URL
+        markdown_content = re.sub(r'\[(.*?)\]\(([^)]+)\)', replace_link_url, markdown_content)
+
+        return markdown_content
+
     def _extract_title(self, soup: BeautifulSoup, url: str) -> Optional[str]:
         """
         智能提取页面标题，支持多种来源和格式
@@ -450,7 +505,7 @@ class URLScanner:
 
         返回:
             robots.txt 内容，如果未找到返回 None
-        
+
         注意:
             robots.txt 始终位于网站根目录（https://domain.com/robots.txt）
             不受 root_url 影响。如果需要自定义路径，请使用 robots_path 参数。

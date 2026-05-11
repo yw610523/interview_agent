@@ -82,3 +82,9 @@ url_include_patterns: [ ]
 # URL 排除模式：跳过匹配这些模式的 URL
 # 示例：['/admin/*', '/private/*']
 url_exclude_patterns: [ ]
+
+# --- Sitemap 缓存设置 ---
+
+# Sitemap 解析结果缓存过期时间（秒）：默认 7 天（604800 秒）
+# 用于避免重复解析 sitemap，提升性能
+sitemap_cache_ttl: ${SITEMAP_CACHE_TTL:-604800}

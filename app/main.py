@@ -21,6 +21,8 @@ from app.config.crawler_config import (
     get_scheduler_config,
     load_crawler_config,
 )
+# 导入爬虫相关模块
+from app.services.async_batch_crawler import AsyncBatchCrawler
 # 导入配置热加载管理器
 from app.services.config_hot_reload import config_reload_manager
 # 导入任务管理器
@@ -29,9 +31,6 @@ from app.services.crawl_task_manager import crawl_task_manager, TaskStatus
 from app.services.feedback_service import FeedbackService
 # 导入大模型和向量服务
 from app.services.llm_service import LLMService
-# 导入爬虫相关模块
-from app.services.sitemap_crawler import SitemapCrawler
-from app.services.async_batch_crawler import AsyncBatchCrawler
 from app.services.vector_service import VectorService, VectorRecord
 
 app = FastAPI(title="Interview AI Agent")
@@ -308,12 +307,14 @@ def run_crawler() -> Dict[str, Any]:
 
             except Exception as e:
                 logger.error(f"页面处理失败: {str(e)}")
-        
-        # 从sitemap获取URL列表
+
+        # 如果需要从sitemap获取URLs，需要先解析sitemap
         from app.services.sitemap_parser import SitemapParser
         from app.services.url_scanner import URLScanner
         from app.config.firecrawl_config import get_firecrawl_config
-        
+        from app.config.config_manager import config_manager
+        import json
+
         # 初始化扫描器以检查robots.txt
         firecrawl_cfg = get_firecrawl_config()
         scanner = URLScanner(
@@ -328,12 +329,12 @@ def run_crawler() -> Dict[str, Any]:
             firecrawl_api_version=firecrawl_cfg.api_version,
             firecrawl_only_main_content=firecrawl_cfg.only_main_content,
         )
-        
+
         # 标准化sitemap URL
         sitemap_url = config.sitemap_url
         if not sitemap_url.startswith(('http://', 'https://')):
             sitemap_url = f"https://{sitemap_url}"
-        
+
         # 如果只是域名（没有路径），自动添加 sitemap.xml 路径
         from urllib.parse import urlparse
         parsed = urlparse(sitemap_url)
@@ -343,7 +344,7 @@ def run_crawler() -> Dict[str, Any]:
             sitemap_path = config.sitemap_path if config.sitemap_path else '/sitemap.xml'
             sitemap_url = f"{parsed.scheme}://{parsed.netloc}{root_url}{sitemap_path}"
             logger.info(f"自动补全 Sitemap URL: {sitemap_url}")
-        
+
         # 检查robots.txt
         if config.check_robots_txt:
             robots_txt = scanner.check_robots_txt(sitemap_url, config.robots_path)
@@ -351,12 +352,36 @@ def run_crawler() -> Dict[str, Any]:
                 # 简单的robots.txt检查
                 if 'Disallow: /' in robots_txt:
                     raise PermissionError("robots.txt 禁止爬取此网站")
+
+        # 检查 Redis 缓存中的 URL 列表
+        redis_client = config_manager.redis_client
+        cache_key = f"{SITEMAP_CACHE_PREFIX}{sitemap_url}"
+        urls = []
+        from_cache = False
         
-        # 解析sitemap获取URL列表
-        parser = SitemapParser(sitemap_url)
-        parser.fetch_sitemap()
-        urls = parser.parse()
-        
+        if redis_client:
+            try:
+                cached_data = redis_client.get(cache_key)
+                if cached_data:
+                    logger.info(f"爬取任务使用 Redis 缓存的 Sitemap 数据: {cache_key}")
+                    result = json.loads(cached_data)
+                    if 'urls' in result and result['urls']:
+                        urls = result['urls']
+                        from_cache = True
+                        logger.info(f"从缓存获取到 {len(urls)} 个 URL")
+            except Exception as e:
+                logger.warning(f"Redis 缓存读取失败: {str(e)}，将重新解析")
+
+        # 如果缓存中没有 URL，则解析 sitemap
+        if not urls:
+            logger.info(f"开始解析 Sitemap: {sitemap_url}")
+            parser = SitemapParser(sitemap_url)
+            parser.fetch_sitemap()
+            urls = parser.parse()
+            logger.info(f"Sitemap 解析完成，共获取到 {len(urls)} 个 URL")
+        else:
+            logger.info(f"使用缓存的 Sitemap URL 列表，共 {len(urls)} 个 URL")
+
         # 应用URL过滤
         from app.services.url_filter import URLFilter
         url_filter = URLFilter.from_config(config)
@@ -366,11 +391,11 @@ def run_crawler() -> Dict[str, Any]:
             filtered_count = original_count - len(urls)
             if filtered_count > 0:
                 logger.info(f"URL过滤: 原始={original_count}, 过滤后={len(urls)}, 排除={filtered_count}")
-        
+
         # 限制最大URL数量
         if config.max_urls and len(urls) > config.max_urls:
             urls = urls[:config.max_urls]
-        
+
         # 执行异步批量爬取
         results = async_crawler.crawl_batch(
             urls=urls,
@@ -381,7 +406,7 @@ def run_crawler() -> Dict[str, Any]:
 
         # 获取统计信息
         stats = async_crawler.get_stats()
-        
+
         logger.info(
             f"解析出 {total_parsed_questions} 个面试问题，成功插入 {inserted_count} 个问题到向量数据库"
         )
@@ -416,7 +441,7 @@ def run_crawler() -> Dict[str, Any]:
                 logger.info("爬虫结果已存入 Redis")
         except Exception as e:
             logger.warning(f"存储爬虫结果到 Redis 失败: {str(e)}")
-        
+
         # 关闭线程池
         async_crawler.shutdown()
 
@@ -512,12 +537,14 @@ async def trigger_crawl_async():
 
                     except Exception as e:
                         logger.error(f"页面处理失败: {str(e)}")
-                
+
                 # 如果需要从sitemap获取URLs，需要先解析sitemap
                 from app.services.sitemap_parser import SitemapParser
                 from app.services.url_scanner import URLScanner
                 from app.config.firecrawl_config import get_firecrawl_config
-                
+                from app.config.config_manager import config_manager
+                import json
+
                 # 初始化扫描器以检查robots.txt
                 firecrawl_cfg = get_firecrawl_config()
                 scanner = URLScanner(
@@ -532,12 +559,12 @@ async def trigger_crawl_async():
                     firecrawl_api_version=firecrawl_cfg.api_version,
                     firecrawl_only_main_content=firecrawl_cfg.only_main_content,
                 )
-                
+
                 # 标准化sitemap URL
                 sitemap_url = config.sitemap_url
                 if not sitemap_url.startswith(('http://', 'https://')):
                     sitemap_url = f"https://{sitemap_url}"
-                
+
                 # 如果只是域名（没有路径），自动添加 sitemap.xml 路径
                 from urllib.parse import urlparse
                 parsed = urlparse(sitemap_url)
@@ -547,7 +574,7 @@ async def trigger_crawl_async():
                     sitemap_path = config.sitemap_path if config.sitemap_path else '/sitemap.xml'
                     sitemap_url = f"{parsed.scheme}://{parsed.netloc}{root_url}{sitemap_path}"
                     logger.info(f"自动补全 Sitemap URL: {sitemap_url}")
-                
+
                 # 检查robots.txt
                 if config.check_robots_txt:
                     robots_txt = scanner.check_robots_txt(sitemap_url, config.robots_path)
@@ -555,21 +582,55 @@ async def trigger_crawl_async():
                         # 简单的robots.txt检查
                         if 'Disallow: /' in robots_txt:
                             raise PermissionError("robots.txt 禁止爬取此网站")
-                
-                # 解析sitemap获取URL列表
-                logger.info(f"开始解析 Sitemap: {sitemap_url}")
-                parser = SitemapParser(sitemap_url)
-                
+
+                # 检查 Redis 缓存中的 URL 列表
                 try:
-                    parser.fetch_sitemap()
-                    logger.info("Sitemap 获取成功")
+                    logger.info(f"[DEBUG] 即将检查 Redis 缓存, redis_client={config_manager.redis_client is not None}")
+                    redis_client = config_manager.redis_client
+                    cache_key = f"{SITEMAP_CACHE_PREFIX}{sitemap_url}"
+                    logger.info(f"[DEBUG] cache_key={cache_key}")
+                    urls = []
+                    from_cache = False
+                    
+                    if redis_client:
+                        logger.info(f"[DEBUG] 进入 if redis_client 分支")
+                        cached_data = redis_client.get(cache_key)
+                        logger.info(f"[DEBUG] Redis 查询完成, cached_data={'存在' if cached_data else '不存在'}")
+                        if cached_data:
+                            logger.info(f"异步爬取使用 Redis 缓存的 Sitemap 数据: {cache_key}")
+                            result = json.loads(cached_data)
+                            if 'urls' in result and result['urls']:
+                                urls = result['urls']
+                                from_cache = True
+                                logger.info(f"从缓存获取到 {len(urls)} 个 URL")
+                        else:
+                            logger.info(f"[DEBUG] 缓存不存在, 将解析 sitemap")
+                    else:
+                        logger.warning("Redis 客户端不可用，将直接解析 Sitemap")
                 except Exception as e:
-                    logger.error(f"Sitemap 获取失败: {str(e)}")
-                    raise ValueError(f"无法获取 Sitemap: {str(e)}")
-                
-                urls = parser.parse()
-                logger.info(f"Sitemap 解析完成，共获取到 {len(urls)} 个 URL")
-                
+                    import traceback
+                    logger.error(f"[DEBUG] Redis 缓存检查阶段发生异常: {e}")
+                    logger.error(traceback.format_exc())
+                    urls = []
+                    from_cache = False
+
+                # 如果缓存中没有 URL，则解析 sitemap
+                if not urls:
+                    logger.info(f"开始解析 Sitemap: {sitemap_url}")
+                    parser = SitemapParser(sitemap_url)
+
+                    try:
+                        parser.fetch_sitemap()
+                        logger.info("Sitemap 获取成功")
+                    except Exception as e:
+                        logger.error(f"Sitemap 获取失败: {str(e)}")
+                        raise ValueError(f"无法获取 Sitemap: {str(e)}")
+
+                    urls = parser.parse()
+                    logger.info(f"Sitemap 解析完成，共获取到 {len(urls)} 个 URL")
+                else:
+                    logger.info(f"使用缓存的 Sitemap URL 列表，共 {len(urls)} 个 URL")
+
                 if len(urls) == 0:
                     logger.warning("Sitemap 中未找到任何 URL，请检查:")
                     logger.warning(f"1. Sitemap URL 是否正确: {sitemap_url}")
@@ -578,7 +639,7 @@ async def trigger_crawl_async():
                     # 打印前几个URL样本用于调试
                     if hasattr(parser, '_xml_content') and parser._xml_content:
                         logger.warning(f"Sitemap 内容预览（前500字符）: {parser._xml_content[:500]}")
-                
+
                 # 应用URL过滤
                 from app.services.url_filter import URLFilter
                 url_filter = URLFilter.from_config(config)
@@ -588,11 +649,11 @@ async def trigger_crawl_async():
                     filtered_count = original_count - len(urls)
                     if filtered_count > 0:
                         logger.info(f"URL过滤: 原始={original_count}, 过滤后={len(urls)}, 排除={filtered_count}")
-                
+
                 # 限制最大URL数量
                 if config.max_urls and len(urls) > config.max_urls:
                     urls = urls[:config.max_urls]
-                
+
                 # 执行异步批量爬取
                 results = async_crawler.crawl_batch(
                     urls=urls,
@@ -635,7 +696,7 @@ async def trigger_crawl_async():
                             logger.info("已更新中断任务的全局状态到 Redis")
                     except Exception as e:
                         logger.warning(f"存储中断任务状态到 Redis 失败: {str(e)}")
-                    
+
                     # 关闭线程池
                     async_crawler.shutdown()
                 else:
@@ -677,7 +738,7 @@ async def trigger_crawl_async():
                             logger.info("已更新全局爬取状态到 Redis")
                     except Exception as e:
                         logger.warning(f"存储爬虫结果到 Redis 失败: {str(e)}")
-                    
+
                     # 关闭线程池
                     async_crawler.shutdown()
 
@@ -2059,20 +2120,20 @@ async def crawl_batch_urls(urls: List[str], max_workers: int = Query(5, ge=1, le
         max_workers: 最大并发线程数（1-20，默认5）
     """
     import uuid
-    
+
     if not urls:
         raise HTTPException(status_code=400, detail="URL列表不能为空")
-    
+
     try:
         # 生成任务ID
         task_id = str(uuid.uuid4())
-        
+
         # 创建任务
         task = crawl_task_manager.create_task(task_id)
-        
+
         # 加载配置
         config = load_crawler_config()
-        
+
         # 在后台线程中执行批量爬取
         def run_batch_crawl():
             try:
@@ -2083,27 +2144,27 @@ async def crawl_batch_urls(urls: List[str], max_workers: int = Query(5, ge=1, le
                     start_time=datetime.now().isoformat(),
                     total_urls=len(urls)
                 )
-                
+
                 # 创建异步批量爬虫
                 async_crawler = AsyncBatchCrawler(
                     config=config,
                     max_workers=max_workers,
                     timeout_per_url=config.timeout
                 )
-                
+
                 # 统计变量
                 inserted_count = 0
                 total_parsed_questions = 0
-                
+
                 # 定义页面处理回调
                 def on_page_processed(page_data):
                     nonlocal total_parsed_questions
                     try:
                         if task.stop_flag.is_set():
                             return
-                        
+
                         page_list = [page_data]
-                        
+
                         def on_question_found(questions):
                             nonlocal inserted_count
                             records = []
@@ -2121,19 +2182,19 @@ async def crawl_batch_urls(urls: List[str], max_workers: int = Query(5, ge=1, le
                                 records.append(record)
                             count = vector_service.insert_questions(records)
                             inserted_count += count
-                            
+
                             task.parsed_questions += len(questions)
                             task.inserted_questions = inserted_count
-                        
+
                         parsed_questions = llm_service.parse_crawl_results(
                             page_list, on_question_found=on_question_found
                         )
                         total_parsed_questions += len(parsed_questions)
                         task.processed_urls += 1
-                        
+
                     except Exception as e:
                         logger.error(f"页面处理失败: {str(e)}")
-                
+
                 # 执行批量爬取
                 results = async_crawler.crawl_batch(
                     urls=urls,
@@ -2141,7 +2202,7 @@ async def crawl_batch_urls(urls: List[str], max_workers: int = Query(5, ge=1, le
                     page_processed_callback=on_page_processed,
                     stop_flag=task.stop_flag
                 )
-                
+
                 # 检查是否被中断
                 if task.stop_flag.is_set():
                     stats = async_crawler.get_stats()
@@ -2153,14 +2214,14 @@ async def crawl_batch_urls(urls: List[str], max_workers: int = Query(5, ge=1, le
                         "parsed_questions": total_parsed_questions,
                         "inserted_questions": inserted_count,
                     }
-                    
+
                     crawl_task_manager.update_task_status(
                         task_id,
                         TaskStatus.STOPPED,
                         end_time=datetime.now().isoformat(),
                         error_message="任务被用户中断"
                     )
-                    
+
                     # 更新Redis
                     try:
                         if vector_service.redis_client:
@@ -2177,7 +2238,7 @@ async def crawl_batch_urls(urls: List[str], max_workers: int = Query(5, ge=1, le
                     task.processed_urls = stats.successful_scans + stats.failed_scans
                     task.parsed_questions = total_parsed_questions
                     task.inserted_questions = inserted_count
-                    
+
                     result = {
                         "status": "success",
                         "message": "批量爬取完成",
@@ -2186,14 +2247,14 @@ async def crawl_batch_urls(urls: List[str], max_workers: int = Query(5, ge=1, le
                         "parsed_questions": total_parsed_questions,
                         "inserted_questions": inserted_count,
                     }
-                    
+
                     crawl_task_manager.update_task_status(
                         task_id,
                         TaskStatus.COMPLETED,
                         end_time=datetime.now().isoformat(),
                         result=result
                     )
-                    
+
                     # 更新Redis
                     try:
                         if vector_service.redis_client:
@@ -2207,10 +2268,10 @@ async def crawl_batch_urls(urls: List[str], max_workers: int = Query(5, ge=1, le
                             )
                     except Exception as e:
                         logger.warning(f"存储结果到 Redis 失败: {str(e)}")
-                
+
                 # 关闭线程池
                 async_crawler.shutdown()
-                
+
             except Exception as e:
                 logger.error(f"批量爬取任务失败: {str(e)}")
                 crawl_task_manager.update_task_status(
@@ -2223,11 +2284,11 @@ async def crawl_batch_urls(urls: List[str], max_workers: int = Query(5, ge=1, le
                     async_crawler.shutdown()
                 except:
                     pass
-        
+
         # 启动后台线程
         thread = Thread(target=run_batch_crawl, daemon=True)
         thread.start()
-        
+
         return {
             "status": "accepted",
             "message": "批量爬取任务已启动",
@@ -2235,7 +2296,7 @@ async def crawl_batch_urls(urls: List[str], max_workers: int = Query(5, ge=1, le
             "total_urls": len(urls),
             "max_workers": max_workers
         }
-        
+
     except Exception as e:
         logger.error(f"启动批量爬取任务失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -2259,6 +2320,10 @@ async def get_crawler_config():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Sitemap 解析结果缓存键前缀
+SITEMAP_CACHE_PREFIX = "sitemap_cache:"
+
+
 @app.get("/api/config/test-url", summary="测试URL连通性")
 async def test_url_connectivity(url: str):
     """
@@ -2269,30 +2334,30 @@ async def test_url_connectivity(url: str):
     """
     import urllib.request
     import ssl
-    
+
     try:
         if not url:
             raise HTTPException(status_code=400, detail="URL不能为空")
-        
+
         # 如果URL不包含协议，默认添加https://
         if not url.startswith(('http://', 'https://')):
             url = f"https://{url}"
-        
+
         # 创建SSL上下文（不验证证书以避免某些网站证书问题）
         ssl_context = ssl.create_default_context()
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
-        
+
         # 发送请求
         req = urllib.request.Request(
             url,
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         )
-        
+
         response = urllib.request.urlopen(req, timeout=10, context=ssl_context)
         status_code = response.getcode()
         is_accessible = status_code < 400
-        
+
         return {
             "status": "success",
             "url": url,
@@ -2315,6 +2380,174 @@ async def test_url_connectivity(url: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/config/sitemap-paths", summary="获取Sitemap路径树")
+async def get_sitemap_paths(sitemap_url: Optional[str] = None, root_url: Optional[str] = ""):
+    """
+    解析sitemap，返回树状路径结构供用户选择
+    
+    参数:
+        sitemap_url: 可选的sitemap URL（优先使用参数，否则从配置读取）
+        root_url: 可选的根路径前缀
+    
+    返回格式:
+    [
+        {
+            "title": "/backend_interview",
+            "key": "/backend_interview",
+            "children": [
+                {"title": "/bank", "key": "/backend_interview/bank"},
+                ...
+            ]
+        },
+        ...
+    ]
+    """
+    try:
+        from app.config.crawler_config import load_crawler_config
+        from app.services.sitemap_parser import SitemapParser
+        from app.config.config_manager import config_manager
+        from urllib.parse import urlparse
+        import json
+        
+        # 加载配置
+        config = load_crawler_config()
+        
+        # 优先使用参数传入的URL，其次使用配置中的URL
+        if sitemap_url:
+            effective_sitemap_url = sitemap_url
+        else:
+            effective_sitemap_url = config.sitemap_url
+        
+        if not effective_sitemap_url:
+            raise HTTPException(status_code=400, detail="未配置Sitemap URL")
+        
+        # 优先使用参数传入的root_url，其次使用配置中的root_url
+        effective_root_url = root_url if root_url is not None else config.root_url
+        
+        # 构建完整的sitemap URL
+        sitemap_url_full = effective_sitemap_url
+        if not sitemap_url_full.startswith(('http://', 'https://')):
+            sitemap_url_full = f"https://{sitemap_url_full}"
+        
+        parsed = urlparse(sitemap_url_full)
+        if not parsed.path or parsed.path == '/':
+            root_url_clean = effective_root_url.rstrip('/')
+            sitemap_path = config.sitemap_path if config.sitemap_path else '/sitemap.xml'
+            sitemap_url_full = f"{parsed.scheme}://{parsed.netloc}{root_url_clean}{sitemap_path}"
+        
+        logger.info(f"请求解析 Sitemap: sitemap_url={effective_sitemap_url}, root_url={effective_root_url}, full_url={sitemap_url_full}")
+
+        # 获取缓存过期时间（默认 7 天）
+        cache_ttl = getattr(config, 'sitemap_cache_ttl', 604800)
+        if not cache_ttl or cache_ttl <= 0:
+            cache_ttl = 604800  # 默认 7 天
+                
+        # 检查 Redis 缓存
+        redis_client = config_manager.redis_client
+        cache_key = f"{SITEMAP_CACHE_PREFIX}{sitemap_url_full}"
+                
+        logger.info(f"检查 Sitemap 缓存: redis_client={redis_client is not None}, cache_key={cache_key}")
+
+        if redis_client:
+            try:
+                cached_data = redis_client.get(cache_key)
+                logger.info(f"Redis 查询结果: cached_data={'存在' if cached_data else '不存在'}")
+                if cached_data:
+                    logger.info(f"使用 Redis 缓存的 Sitemap 数据: {cache_key}")
+                    result = json.loads(cached_data)
+                    return {
+                        "status": "success",
+                        "paths": result['paths'],
+                        "total_urls": result['total_urls'],
+                        "from_cache": True,
+                        "cache_type": "redis"
+                    }
+            except Exception as e:
+                logger.warning(f"Redis 缓存读取失败: {str(e)}，将重新解析")
+
+        # 解析sitemap
+        parser = SitemapParser(sitemap_url_full)
+        parser.fetch_sitemap()
+        urls = parser.parse()
+                
+        logger.info(f"成功解析sitemap，共 {len(urls)} 个URL")
+        if urls:
+            logger.info(f"示例URL: {urls[:5]}")
+
+        if not urls:
+            return {
+                "status": "success",
+                "paths": []
+            }
+
+        # 构建树状结构
+        path_tree = {}
+        for url in urls:
+            parsed_url = urlparse(url)
+            path = parsed_url.path
+
+            # 跳过根路径
+            if path == '/' or not path:
+                continue
+
+            # 分割路径为层级
+            parts = [p for p in path.split('/') if p]
+
+            # 逐层构建树
+            current = path_tree
+            for i, part in enumerate(parts):
+                full_path = '/' + '/'.join(parts[:i + 1])
+                if full_path not in current:
+                    # title 使用解码后的中文（便于用户阅读），key 保持编码格式（用于配置匹配）
+                    from urllib.parse import unquote
+                    decoded_part = unquote(part)
+                    current[full_path] = {
+                        'title': '/' + decoded_part,
+                        'key': full_path,
+                        'children': {}
+                    }
+                current = current[full_path]['children']
+
+        # 转换为列表格式
+        def tree_to_list(tree_dict):
+            result = []
+            for key, node in tree_dict.items():
+                item = {
+                    'title': node['title'],
+                    'key': node['key']
+                }
+                children = tree_to_list(node['children'])
+                if children:
+                    item['children'] = children
+                result.append(item)
+            return result
+
+        paths = tree_to_list(path_tree)
+
+        # 保存到 Redis 缓存
+        if redis_client:
+            try:
+                cache_data = json.dumps({
+                    'paths': paths,
+                    'urls': urls,  # 保存原始 URL 列表供爬取使用
+                    'total_urls': len(urls)
+                }, ensure_ascii=False)
+                redis_client.setex(cache_key, cache_ttl, cache_data)
+                logger.info(f"Sitemap 数据已缓存到 Redis，TTL={cache_ttl}秒, cache_key={cache_key}")
+            except Exception as e:
+                logger.warning(f"Redis 缓存保存失败: {str(e)}")
+
+        return {
+            "status": "success",
+            "paths": paths,
+            "total_urls": len(urls),
+            "from_cache": False,
+            "cache_type": "fresh"
+        }
+
+    except Exception as e:
+        logger.error(f"解析Sitemap路径失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.put("/api/config", summary="更新爬虫配置")
@@ -2323,21 +2556,71 @@ async def update_crawler_config(config_data: Dict[str, Any]):
     更新爬虫配置并保存到独立配置文件
     """
     try:
-        # 使用 ConfigManager 保存到运行时配置（不写入文件）
         from app.config.config_manager import config_manager
+        from app.config.crawler_config import load_crawler_config
+        from urllib.parse import urlparse
 
+        # 获取当前配置（用于对比是否有sitemap相关变更）
+        old_config = load_crawler_config()
+
+        # 使用 ConfigManager 保存到运行时配置（不写入文件）
         success = config_manager.save_config('crawler', config_data, persist_to_file=False)
         if not success:
             raise HTTPException(status_code=500, detail="保存配置文件失败")
+
+        # 检查 sitemap_url 或 root_url 是否发生变化
+        new_sitemap_url = config_data.get('sitemap_url')
+        new_root_url = config_data.get('root_url', '')
+
+        sitemap_changed = False
+        if new_sitemap_url and new_sitemap_url != old_config.sitemap_url:
+            sitemap_changed = True
+        elif new_root_url and new_root_url != old_config.root_url:
+            sitemap_changed = True
+
+        # 如果sitemap配置发生变化，清除旧的缓存
+        if sitemap_changed and old_config.sitemap_url:
+            try:
+                redis_client = config_manager.redis_client
+                if redis_client:
+                    # 构建旧的sitemap URL（用于删除缓存）
+                    old_sitemap_url = old_config.sitemap_url
+                    if not old_sitemap_url.startswith(('http://', 'https://')):
+                        old_sitemap_url = f"https://{old_sitemap_url}"
+
+                    old_parsed = urlparse(old_sitemap_url)
+                    if not old_parsed.path or old_parsed.path == '/':
+                        old_root = old_config.root_url.rstrip('/')
+                        old_sitemap_path = old_config.sitemap_path if old_config.sitemap_path else '/sitemap.xml'
+                        old_sitemap_url = f"{old_parsed.scheme}://{old_parsed.netloc}{old_root}{old_sitemap_path}"
+
+                    # 删除旧缓存
+                    old_cache_key = f"{SITEMAP_CACHE_PREFIX}{old_sitemap_url}"
+                    redis_client.delete(old_cache_key)
+                    logger.info(f"已清除旧网站的sitemap缓存: {old_cache_key}")
+
+                    # 同时清除所有 sitemap_cache 前缀的缓存（保守策略）
+                    try:
+                        pattern = f"{SITEMAP_CACHE_PREFIX}*"
+                        keys = redis_client.keys(pattern)
+                        if keys:
+                            redis_client.delete(*keys)
+                            logger.info(f"已清除 {len(keys)} 个 sitemap 缓存键")
+                    except Exception as e:
+                        logger.warning(f"批量清除缓存失败: {str(e)}")
+            except Exception as e:
+                logger.warning(f"清除旧sitemap缓存失败: {str(e)}")
 
         # 热加载配置
         reload_success = config_reload_manager.reload_crawler_config()
 
         return {
             "status": "success",
-            "message": "爬虫配置已更新（运行时生效，重启后恢复为配置文件默认值）",
+            "message": "爬虫配置已更新（运行时生效，重启后恢复为配置文件默认值）" +
+                       ("，已清除旧的sitemap缓存" if sitemap_changed else ""),
             "hot_reload": reload_success,
-            "config": config_data
+            "config": config_data,
+            "sitemap_cache_cleared": sitemap_changed
         }
     except Exception as e:
         logger.error(f"更新爬虫配置失败: {str(e)}")
@@ -2903,13 +3186,13 @@ def scheduled_crawl():
     """
     import uuid
     from datetime import datetime
-    
+
     logger.info(f"开始执行定时爬取任务...")
-    
+
     # 生成任务ID
     task_id = str(uuid.uuid4())
     task = crawl_task_manager.create_task(task_id)
-    
+
     # 在后台线程中执行（与手动触发相同逻辑）
     def run_scheduled_crawl():
         try:
@@ -2918,33 +3201,33 @@ def scheduled_crawl():
                 TaskStatus.RUNNING,
                 start_time=datetime.now().isoformat()
             )
-            
+
             # 加载配置
             config = load_crawler_config()
-            
+
             if not config.sitemap_url:
                 raise ValueError("未指定 Sitemap URL")
-            
+
             # 使用异步批量爬虫
             async_crawler = AsyncBatchCrawler(
                 config=config,
                 max_workers=5,
                 timeout_per_url=config.timeout
             )
-            
+
             # 统计变量
             inserted_count = 0
             total_parsed_questions = 0
-            
+
             # 定义页面处理回调
             def on_page_processed(page_data):
                 nonlocal total_parsed_questions
                 try:
                     if task.stop_flag.is_set():
                         return
-                    
+
                     page_list = [page_data]
-                    
+
                     def on_question_found(questions):
                         nonlocal inserted_count
                         records = []
@@ -2964,21 +3247,23 @@ def scheduled_crawl():
                         inserted_count += count
                         task.parsed_questions += len(questions)
                         task.inserted_questions = inserted_count
-                    
+
                     parsed_questions = llm_service.parse_crawl_results(
                         page_list, on_question_found=on_question_found
                     )
                     total_parsed_questions += len(parsed_questions)
                     task.processed_urls += 1
-                    
+
                 except Exception as e:
                     logger.error(f"页面处理失败: {str(e)}")
-            
-            # 从sitemap获取URL列表
+
+            # 如果需要从sitemap获取URLs，需要先解析sitemap
             from app.services.sitemap_parser import SitemapParser
             from app.services.url_scanner import URLScanner
             from app.config.firecrawl_config import get_firecrawl_config
-            
+            from app.config.config_manager import config_manager
+            import json
+
             firecrawl_cfg = get_firecrawl_config()
             scanner = URLScanner(
                 timeout=config.timeout,
@@ -2992,11 +3277,11 @@ def scheduled_crawl():
                 firecrawl_api_version=firecrawl_cfg.api_version,
                 firecrawl_only_main_content=firecrawl_cfg.only_main_content,
             )
-            
+
             sitemap_url = config.sitemap_url
             if not sitemap_url.startswith(('http://', 'https://')):
                 sitemap_url = f"https://{sitemap_url}"
-            
+
             # 如果只是域名（没有路径），自动添加 sitemap.xml 路径
             from urllib.parse import urlparse
             parsed = urlparse(sitemap_url)
@@ -3005,33 +3290,58 @@ def scheduled_crawl():
                 sitemap_path = config.sitemap_path if config.sitemap_path else '/sitemap.xml'
                 sitemap_url = f"{parsed.scheme}://{parsed.netloc}{root_url}{sitemap_path}"
                 logger.info(f"自动补全 Sitemap URL: {sitemap_url}")
-            
+
             if config.check_robots_txt:
                 robots_txt = scanner.check_robots_txt(sitemap_url, config.robots_path)
                 if robots_txt and 'Disallow: /' in robots_txt:
                     raise PermissionError("robots.txt 禁止爬取此网站")
+
+            # 检查 Redis 缓存中的 URL 列表
+            redis_client = config_manager.redis_client
+            cache_key = f"{SITEMAP_CACHE_PREFIX}{sitemap_url}"
+            urls = []
+            from_cache = False
             
-            parser = SitemapParser(sitemap_url)
-            parser.fetch_sitemap()
-            urls = parser.parse()
-            
+            if redis_client:
+                try:
+                    cached_data = redis_client.get(cache_key)
+                    if cached_data:
+                        logger.info(f"定时爬取使用 Redis 缓存的 Sitemap 数据: {cache_key}")
+                        result = json.loads(cached_data)
+                        if 'urls' in result and result['urls']:
+                            urls = result['urls']
+                            from_cache = True
+                            logger.info(f"从缓存获取到 {len(urls)} 个 URL")
+                except Exception as e:
+                    logger.warning(f"Redis 缓存读取失败: {str(e)}，将重新解析")
+
+            # 如果缓存中没有 URL，则解析 sitemap
+            if not urls:
+                logger.info(f"开始解析 Sitemap: {sitemap_url}")
+                parser = SitemapParser(sitemap_url)
+                parser.fetch_sitemap()
+                urls = parser.parse()
+                logger.info(f"Sitemap 解析完成，共获取到 {len(urls)} 个 URL")
+            else:
+                logger.info(f"使用缓存的 Sitemap URL 列表，共 {len(urls)} 个 URL")
+
             from app.services.url_filter import URLFilter
             url_filter = URLFilter.from_config(config)
             if config.url_include_patterns or config.url_exclude_patterns:
                 urls = url_filter.filter_urls(urls)
-            
+
             if config.max_urls and len(urls) > config.max_urls:
                 urls = urls[:config.max_urls]
-            
+
             # 执行批量爬取
             results = async_crawler.crawl_batch(
                 urls=urls,
                 page_processed_callback=on_page_processed,
                 stop_flag=task.stop_flag
             )
-            
+
             stats = async_crawler.get_stats()
-            
+
             result = {
                 "status": "success",
                 "message": "定时爬取完成",
@@ -3040,14 +3350,14 @@ def scheduled_crawl():
                 "parsed_questions": total_parsed_questions,
                 "inserted_questions": inserted_count,
             }
-            
+
             crawl_task_manager.update_task_status(
                 task_id,
                 TaskStatus.COMPLETED,
                 end_time=datetime.now().isoformat(),
                 result=result
             )
-            
+
             # 更新Redis
             try:
                 if vector_service.redis_client:
@@ -3057,10 +3367,10 @@ def scheduled_crawl():
                     vector_service.redis_client.setex("crawl:last_time", 86400, crawl_time)
             except Exception as e:
                 logger.warning(f"存储结果到 Redis 失败: {str(e)}")
-            
+
             async_crawler.shutdown()
             logger.info(f"定时爬取任务完成: {total_parsed_questions} 个问题")
-            
+
         except Exception as e:
             logger.error(f"定时爬取任务失败: {str(e)}")
             crawl_task_manager.update_task_status(
@@ -3073,7 +3383,7 @@ def scheduled_crawl():
                 async_crawler.shutdown()
             except:
                 pass
-    
+
     # 启动后台线程
     from threading import Thread
     thread = Thread(target=run_scheduled_crawl, daemon=True)
@@ -3106,14 +3416,14 @@ async def test_sitemap(sitemap_url: str = Query(..., description="要测试的 S
     """
     try:
         from app.services.sitemap_parser import SitemapParser
-        
+
         logger.info(f"测试 Sitemap: {sitemap_url}")
-        
-        # 解析 sitemap
-        parser = SitemapParser(sitemap_url)
+
+        # 解析sitemap
+        parser = SitemapParser(full_sitemap_url)
         parser.fetch_sitemap()
         urls = parser.parse()
-        
+
         return {
             "status": "success",
             "sitemap_url": sitemap_url,

@@ -68,7 +68,7 @@ class LLMService:
         # 优先从 config.yaml 读取，兼容环境变量
         config_max_input = config_manager.get('llm.max_input_tokens')
         config_max_output = config_manager.get('llm.max_output_tokens')
-        
+
         # 如果 config.yaml 没有配置，尝试从环境变量读取
         if config_max_input is None:
             config_max_input = os.getenv("MODEL_MAX_INPUT_TOKENS")
@@ -220,9 +220,8 @@ class LLMService:
         for result in crawl_results:
             url = result.get("url", "")
             title = result.get("title", "")
-            text_content = result.get("text_content", "") or result.get(
-                "html_content", ""
-            )
+            # 使用 text_content (Markdown 格式)
+            text_content = result.get("text_content", "")
 
             if not text_content:
                 continue
@@ -283,40 +282,6 @@ class LLMService:
             return f"# {title}\n\n{text}"
         return text
 
-    def _is_technical_sentence(self, sentence: str) -> bool:
-        """判断句子是否可能包含技术内容"""
-        technical_keywords = [
-            "实现",
-            "原理",
-            "机制",
-            "流程",
-            "架构",
-            "设计",
-            "优化",
-            "性能",
-            "算法",
-            "数据结构",
-            "数据库",
-            "网络",
-            "协议",
-            "安全",
-            "并发",
-            "分布式",
-            "微服务",
-            "容器",
-            "云原生",
-            "人工智能",
-            "机器学习",
-            "深度学习",
-            "自然语言",
-            "计算机视觉",
-            "大数据",
-            "区块链",
-        ]
-
-        sentence_lower = sentence.lower()
-        return any(keyword in sentence_lower for keyword in technical_keywords)
-
     def _get_system_prompt(self) -> str:
         """
         获取优化的系统提示词（从配置文件读取）
@@ -325,7 +290,7 @@ class LLMService:
         custom_prompt = config_manager.get('prompts.question_extraction_system')
         if custom_prompt:
             return custom_prompt
-        
+
         # 默认提示词（向后兼容）
         return """
 你是一位资深技术面试官和技术内容专家。请仔细阅读提供的网页内容，提取高质量的技术面试问题。
@@ -352,7 +317,7 @@ class LLMService:
 - 适当使用空行分隔段落
 
 示例格式：
-```markdown
+```
 ## 核心概念
 这是核心概念的详细解释...
 
@@ -432,7 +397,7 @@ def example():
         """
         if separators is None:
             separators = ['\n\n', '\n', '。', '！', '？', '.', '!', '?', ' ']
-        
+
         chunks = []
         content_length = len(content)
 
@@ -452,20 +417,20 @@ def example():
                 search_start = start + max_length // 2
                 if search_start >= end:
                     search_start = start + (max_length - overlap)
-                
+
                 pos = content.rfind(sep, search_start, end)
                 if pos != -1:
                     split_pos = pos + len(sep)
                     break
 
             chunk = content[start:split_pos]
-            
+
             # 跳过过小的 chunk（合并到前一个）
             if len(chunk.strip()) < min_chunk_length and chunks:
                 chunks[-1] = chunks[-1] + chunk
                 start = split_pos
                 continue
-            
+
             chunks.append(chunk.strip())
 
             # 计算下一个起始位置（考虑重叠）
@@ -500,29 +465,29 @@ def example():
         """
         import re
         chunks = []
-        
+
         # 匹配标题行（# 到 ######）
         heading_pattern = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
         headings = list(heading_pattern.finditer(content))
-        
+
         if not headings:
             # 没有标题，降级为语义切分
             return self._split_content_by_semantics(content, max_length)
-        
+
         # 按标题分割
         for i, heading in enumerate(headings):
             start_pos = heading.start()
             end_pos = headings[i + 1].start() if i + 1 < len(headings) else len(content)
-            
+
             chunk = content[start_pos:end_pos].strip()
-            
+
             # 如果 chunk 太长，再次分割
             if len(chunk) > max_length * 2:
                 sub_chunks = self._split_content_by_semantics(chunk, max_length)
                 chunks.extend(sub_chunks)
             else:
                 chunks.append(chunk)
-        
+
         return chunks
 
     def _split_content_fixed(self, content: str, max_length: int, overlap: int) -> list:
@@ -539,14 +504,14 @@ def example():
         """
         chunks = []
         content_length = len(content)
-        
+
         start = 0
         while start < content_length:
             end = min(start + max_length, content_length)
             chunk = content[start:end]
             chunks.append(chunk)
             start = end - overlap  # 重叠
-        
+
         return chunks
 
     def _build_prompt(self, crawl_results: List[Dict[str, Any]]) -> str:
@@ -574,7 +539,7 @@ def example():
         参数:
             url: 网页URL
             title: 网页标题
-            content: 网页内容
+            content: 网页内容（Markdown格式）
 
         返回:
             从该页面提取的所有面试问题
@@ -584,14 +549,14 @@ def example():
         # 从 content 配置读取切分参数
         from app.config.content_config import get_content_config
         content_config = get_content_config()
-        
+
         chunk_size = content_config.chunk_size
         chunk_overlap = content_config.chunk_overlap
         separators = content_config.separators
         chunking_mode = content_config.chunking_mode
         max_chunks = content_config.max_chunks_per_page
         min_chunk_length = content_config.min_chunk_length
-        
+
         # 判断是否需要分块：如果内容长度小于 chunk_size 的2倍，不分块
         if len(content) <= chunk_size * 2:
             chunks = [content]
@@ -604,20 +569,22 @@ def example():
                 chunks = self._split_content_fixed(content, max_length=chunk_size, overlap=chunk_overlap)
             else:  # semantic (默认)
                 chunks = self._split_content_by_semantics(
-                    content, 
-                    max_length=chunk_size, 
+                    content,
+                    max_length=chunk_size,
                     overlap=chunk_overlap,
                     separators=separators,
                     min_chunk_length=min_chunk_length
                 )
-            
+
             # 限制最大 chunk 数量
             if len(chunks) > max_chunks:
                 logger.warning(f"页面 {url} chunk 数量({len(chunks)})超过限制({max_chunks})，将被截断")
                 chunks = chunks[:max_chunks]
-            
-            logger.info(f"页面 {url} 内容过长({len(content)}字符)，使用 {chunking_mode} 模式分割为 {len(chunks)} 个chunk")
-            logger.info(f"切分参数: chunk_size={chunk_size}, chunk_overlap={chunk_overlap}, separators={len(separators)}个")
+
+            logger.info(
+                f"页面 {url} 内容过长({len(content)}字符)，使用 {chunking_mode} 模式分割为 {len(chunks)} 个chunk")
+            logger.info(
+                f"切分参数: chunk_size={chunk_size}, chunk_overlap={chunk_overlap}, separators={len(separators)}个")
             logger.info(f"各chunk长度: {[len(c) for c in chunks]}")
 
         if self.client is None:
@@ -629,6 +596,7 @@ def example():
 
         for chunk_idx, chunk_content in enumerate(chunks):
             logger.info(f"开始处理 chunk {chunk_idx + 1}/{len(chunks)} (长度: {len(chunk_content)}字符)")
+
             # 构建单chunk的提示词
             prompt = f"""### 网页信息
 URL: {url}
@@ -656,6 +624,7 @@ URL: {url}
                         f"调用大模型参数: model={model_name}, "
                         f"max_tokens={self.max_output_tokens}, "
                         f"temperature=0.3, "
+                        f"top_p=0.85, "
                         f"system_prompt长度={len(system_prompt)}字符, "
                         f"prompt长度={len(prompt)}字符(约{estimated_tokens} tokens), "
                         f"输入上限={self.min_token_limit} tokens"
@@ -668,12 +637,13 @@ URL: {url}
                             {"role": "user", "content": prompt},
                         ],
                         temperature=0.3,
+                        top_p=0.85,  # 过滤低概率词汇，减少幻觉
                         max_tokens=self.max_output_tokens,
                     )
 
                     result = response.choices[0].message.content or ""
                     logger.info(f"LLM返回内容长度: {len(result)} 字符")
-                    
+
                     # 打印返回内容的前500字符用于调试
                     logger.info(f"LLM返回内容前500字符:\n{result[:500]}")
 
@@ -704,7 +674,8 @@ URL: {url}
 
             all_questions.extend(questions)
             if retry_count > 0:
-                logger.info(f"chunk {chunk_idx + 1}/{len(chunks)} 识别出 {len(questions)} 个问题（经过 {retry_count} 次重试）")
+                logger.info(
+                    f"chunk {chunk_idx + 1}/{len(chunks)} 识别出 {len(questions)} 个问题（经过 {retry_count} 次重试）")
             else:
                 logger.info(f"chunk {chunk_idx + 1}/{len(chunks)} 识别出 {len(questions)} 个问题")
 
@@ -770,7 +741,7 @@ URL: {url}
                     # 兼容多种字段名：question 或 title
                     title = item.get("title") or item.get("question", "")
                     answer = item.get("answer", "")
-                    
+
                     question = ParsedQuestion(
                         title=title,
                         answer=answer,
@@ -783,7 +754,8 @@ URL: {url}
                     if question.title and question.answer:
                         questions.append(question)
                     else:
-                        logger.warning(f"跳过无效问题: title='{title[:50] if title else ''}', answer_length={len(answer)}")
+                        logger.warning(
+                            f"跳过无效问题: title='{title[:50] if title else ''}', answer_length={len(answer)}")
 
                 return questions
             else:
@@ -868,7 +840,7 @@ URL: {url}
             logger.info("开始尝试从截断的JSON中恢复数据...")
             # 清理响应文本
             cleaned_response = response.strip()
-            if cleaned_response.startswith("```json"):
+            if cleaned_response.startswith("``json"):
                 cleaned_response = cleaned_response[7:]
             if cleaned_response.endswith("```"):
                 cleaned_response = cleaned_response[:-3]
@@ -1034,7 +1006,8 @@ URL: {url}
                     },
                     {"role": "user", "content": question},
                 ],
-                temperature=0.5,
+                temperature=0.3,
+                top_p=0.85,  # 过滤低概率词汇，减少幻觉
             )
             return response.choices[0].message.content
 
@@ -1063,6 +1036,7 @@ URL: {url}
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.3,
+                    top_p=0.85,  # 过滤低概率词汇，减少幻觉
                     max_tokens=self.max_output_tokens,  # 使用配置的max_output_tokens
                 )
                 content = response.choices[0].message.content
