@@ -49,11 +49,6 @@ export const crawlerApi = {
   // 获取爬虫状态
   getCrawlStatus() {
     return apiClient.get('/crawl/status')
-  },
-
-  // 单页爬取
-  crawlSinglePage(url) {
-    return apiClient.post(`/crawl/single-page?url=${encodeURIComponent(url)}`)
   }
 }
 

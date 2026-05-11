@@ -6,6 +6,7 @@ echo "启动 Interview Agent 应用..."
 # 在后台启动 FastAPI 后端服务
 echo "启动后端 API 服务（端口 8000）..."
 cd /app
+# 使用线程模式（默认），配合 asyncio 事件循环处理并发请求
 python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
 BACKEND_PID=$!
 
