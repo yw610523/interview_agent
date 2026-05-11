@@ -31,6 +31,7 @@ from app.services.feedback_service import FeedbackService
 from app.services.llm_service import LLMService
 # 导入爬虫相关模块
 from app.services.sitemap_crawler import SitemapCrawler
+from app.services.async_batch_crawler import AsyncBatchCrawler
 from app.services.vector_service import VectorService, VectorRecord
 
 app = FastAPI(title="Interview AI Agent")
@@ -377,15 +378,18 @@ async def trigger_crawl_async():
                 if not config.sitemap_url:
                     raise ValueError("未指定 Sitemap URL")
 
-                # 创建爬虫
-                crawler = SitemapCrawler(config=config)
+                # 使用新的异步批量爬虫
+                async_crawler = AsyncBatchCrawler(
+                    config=config,
+                    max_workers=5,  # 默认5个并发线程
+                    timeout_per_url=config.timeout
+                )
 
                 # 统计变量
                 inserted_count = 0
                 total_parsed_questions = 0
 
                 # 定义页面处理回调函数
-
                 def on_page_processed(page_data):
                     nonlocal total_parsed_questions
                     try:
@@ -427,9 +431,63 @@ async def trigger_crawl_async():
 
                     except Exception as e:
                         logger.error(f"页面处理失败: {str(e)}")
-
-                # 启动爬虫，传入停止标志和回调
-                results = crawler.crawl(
+                
+                # 如果需要从sitemap获取URLs，需要先解析sitemap
+                from app.services.sitemap_parser import SitemapParser
+                from app.services.url_scanner import URLScanner
+                from app.config.firecrawl_config import get_firecrawl_config
+                
+                # 初始化扫描器以检查robots.txt
+                firecrawl_cfg = get_firecrawl_config()
+                scanner = URLScanner(
+                    timeout=config.timeout,
+                    follow_redirects=config.follow_redirects,
+                    verify_ssl=config.verify_ssl,
+                    max_content_length=config.max_content_length,
+                    use_firecrawl=config.use_firecrawl,
+                    firecrawl_api_url=firecrawl_cfg.api_url,
+                    firecrawl_api_key=firecrawl_cfg.api_key,
+                    firecrawl_timeout=firecrawl_cfg.timeout,
+                    firecrawl_api_version=firecrawl_cfg.api_version,
+                    firecrawl_only_main_content=firecrawl_cfg.only_main_content,
+                )
+                
+                # 标准化sitemap URL
+                sitemap_url = config.sitemap_url
+                if not sitemap_url.startswith(('http://', 'https://')):
+                    sitemap_url = f"https://{sitemap_url}"
+                
+                # 检查robots.txt
+                if config.check_robots_txt:
+                    robots_txt = scanner.check_robots_txt(sitemap_url, config.robots_path)
+                    if robots_txt:
+                        # 简单的robots.txt检查
+                        if 'Disallow: /' in robots_txt:
+                            raise PermissionError("robots.txt 禁止爬取此网站")
+                
+                # 解析sitemap获取URL列表
+                parser = SitemapParser(sitemap_url)
+                parser.fetch_sitemap()
+                urls = parser.parse()
+                
+                # 应用URL过滤
+                from app.services.url_filter import URLFilter
+                url_filter = URLFilter.from_config(config)
+                if config.url_include_patterns or config.url_exclude_patterns:
+                    original_count = len(urls)
+                    urls = url_filter.filter_urls(urls)
+                    filtered_count = original_count - len(urls)
+                    if filtered_count > 0:
+                        logger.info(f"URL过滤: 原始={original_count}, 过滤后={len(urls)}, 排除={filtered_count}")
+                
+                # 限制最大URL数量
+                if config.max_urls and len(urls) > config.max_urls:
+                    urls = urls[:config.max_urls]
+                
+                # 执行异步批量爬取
+                results = async_crawler.crawl_batch(
+                    urls=urls,
+                    progress_callback=None,
                     page_processed_callback=on_page_processed,
                     stop_flag=task.stop_flag
                 )
@@ -448,18 +506,11 @@ async def trigger_crawl_async():
                     # 更新全局爬取状态到Redis
                     try:
                         if vector_service.redis_client:
-                            stats = crawler.statistics
+                            stats = async_crawler.get_stats()
                             result = {
                                 "status": "stopped",
                                 "message": "任务被用户中断",
-                                "statistics": {
-                                    "total_urls": stats.total_urls,
-                                    "successful_scans": stats.successful_scans,
-                                    "failed_scans": stats.failed_scans,
-                                    "total_load_time": stats.total_load_time,
-                                    "start_time": stats.start_time,
-                                    "end_time": stats.end_time,
-                                },
+                                "statistics": stats.to_dict(),
                                 "result_count": len(results),
                                 "parsed_questions": total_parsed_questions,
                                 "inserted_questions": inserted_count,
@@ -475,9 +526,12 @@ async def trigger_crawl_async():
                             logger.info("已更新中断任务的全局状态到 Redis")
                     except Exception as e:
                         logger.warning(f"存储中断任务状态到 Redis 失败: {str(e)}")
+                    
+                    # 关闭线程池
+                    async_crawler.shutdown()
                 else:
                     # 任务正常完成
-                    stats = crawler.statistics
+                    stats = async_crawler.get_stats()
                     task.total_urls = stats.total_urls
                     task.processed_urls = stats.successful_scans + stats.failed_scans
                     task.parsed_questions = total_parsed_questions
@@ -486,14 +540,7 @@ async def trigger_crawl_async():
                     result = {
                         "status": "success",
                         "message": "爬取完成",
-                        "statistics": {
-                            "total_urls": stats.total_urls,
-                            "successful_scans": stats.successful_scans,
-                            "failed_scans": stats.failed_scans,
-                            "total_load_time": stats.total_load_time,
-                            "start_time": stats.start_time,
-                            "end_time": stats.end_time,
-                        },
+                        "statistics": stats.to_dict(),
                         "result_count": len(results),
                         "parsed_questions": total_parsed_questions,
                         "inserted_questions": inserted_count,
@@ -521,6 +568,9 @@ async def trigger_crawl_async():
                             logger.info("已更新全局爬取状态到 Redis")
                     except Exception as e:
                         logger.warning(f"存储爬虫结果到 Redis 失败: {str(e)}")
+                    
+                    # 关闭线程池
+                    async_crawler.shutdown()
 
             except Exception as e:
                 logger.error(f"任务 {task_id} 执行失败: {str(e)}")
@@ -530,6 +580,11 @@ async def trigger_crawl_async():
                     end_time=datetime.now().isoformat(),
                     error_message=str(e)
                 )
+                # 关闭线程池
+                try:
+                    async_crawler.shutdown()
+                except:
+                    pass
 
         # 启动后台线程
         thread = Thread(target=run_async_crawl, daemon=True)
@@ -1883,6 +1938,198 @@ async def crawl_single_page_stream(url: str):
             "X-Accel-Buffering": "no"  # 禁用Nginx缓冲
         }
     )
+
+
+@app.post("/api/crawl/batch-urls", summary="异步批量爬取指定URL列表")
+async def crawl_batch_urls(urls: List[str], max_workers: int = Query(5, ge=1, le=20)):
+    """
+    异步批量爬取指定的URL列表
+    
+    参数:
+        urls: 要爬取的URL列表
+        max_workers: 最大并发线程数（1-20，默认5）
+    """
+    import uuid
+    
+    if not urls:
+        raise HTTPException(status_code=400, detail="URL列表不能为空")
+    
+    try:
+        # 生成任务ID
+        task_id = str(uuid.uuid4())
+        
+        # 创建任务
+        task = crawl_task_manager.create_task(task_id)
+        
+        # 加载配置
+        config = load_crawler_config()
+        
+        # 在后台线程中执行批量爬取
+        def run_batch_crawl():
+            try:
+                # 更新任务状态为运行中
+                crawl_task_manager.update_task_status(
+                    task_id,
+                    TaskStatus.RUNNING,
+                    start_time=datetime.now().isoformat(),
+                    total_urls=len(urls)
+                )
+                
+                # 创建异步批量爬虫
+                async_crawler = AsyncBatchCrawler(
+                    config=config,
+                    max_workers=max_workers,
+                    timeout_per_url=config.timeout
+                )
+                
+                # 统计变量
+                inserted_count = 0
+                total_parsed_questions = 0
+                
+                # 定义页面处理回调
+                def on_page_processed(page_data):
+                    nonlocal total_parsed_questions
+                    try:
+                        if task.stop_flag.is_set():
+                            return
+                        
+                        page_list = [page_data]
+                        
+                        def on_question_found(questions):
+                            nonlocal inserted_count
+                            records = []
+                            for q in questions:
+                                record = VectorRecord(
+                                    id="",
+                                    title=q.title,
+                                    answer=q.answer,
+                                    source_url=q.source_url,
+                                    tags=q.tags,
+                                    importance_score=q.importance_score,
+                                    difficulty=q.difficulty,
+                                    category=q.category,
+                                )
+                                records.append(record)
+                            count = vector_service.insert_questions(records)
+                            inserted_count += count
+                            
+                            task.parsed_questions += len(questions)
+                            task.inserted_questions = inserted_count
+                        
+                        parsed_questions = llm_service.parse_crawl_results(
+                            page_list, on_question_found=on_question_found
+                        )
+                        total_parsed_questions += len(parsed_questions)
+                        task.processed_urls += 1
+                        
+                    except Exception as e:
+                        logger.error(f"页面处理失败: {str(e)}")
+                
+                # 执行批量爬取
+                results = async_crawler.crawl_batch(
+                    urls=urls,
+                    progress_callback=None,
+                    page_processed_callback=on_page_processed,
+                    stop_flag=task.stop_flag
+                )
+                
+                # 检查是否被中断
+                if task.stop_flag.is_set():
+                    stats = async_crawler.get_stats()
+                    result = {
+                        "status": "stopped",
+                        "message": "任务被用户中断",
+                        "statistics": stats.to_dict(),
+                        "result_count": len(results),
+                        "parsed_questions": total_parsed_questions,
+                        "inserted_questions": inserted_count,
+                    }
+                    
+                    crawl_task_manager.update_task_status(
+                        task_id,
+                        TaskStatus.STOPPED,
+                        end_time=datetime.now().isoformat(),
+                        error_message="任务被用户中断"
+                    )
+                    
+                    # 更新Redis
+                    try:
+                        if vector_service.redis_client:
+                            result_json = json.dumps(result)
+                            vector_service.redis_client.setex(
+                                "crawl:last_result", 86400, result_json
+                            )
+                    except Exception as e:
+                        logger.warning(f"存储状态到 Redis 失败: {str(e)}")
+                else:
+                    # 正常完成
+                    stats = async_crawler.get_stats()
+                    task.total_urls = stats.total_urls
+                    task.processed_urls = stats.successful_scans + stats.failed_scans
+                    task.parsed_questions = total_parsed_questions
+                    task.inserted_questions = inserted_count
+                    
+                    result = {
+                        "status": "success",
+                        "message": "批量爬取完成",
+                        "statistics": stats.to_dict(),
+                        "result_count": len(results),
+                        "parsed_questions": total_parsed_questions,
+                        "inserted_questions": inserted_count,
+                    }
+                    
+                    crawl_task_manager.update_task_status(
+                        task_id,
+                        TaskStatus.COMPLETED,
+                        end_time=datetime.now().isoformat(),
+                        result=result
+                    )
+                    
+                    # 更新Redis
+                    try:
+                        if vector_service.redis_client:
+                            result_json = json.dumps(result)
+                            vector_service.redis_client.setex(
+                                "crawl:last_result", 86400, result_json
+                            )
+                            crawl_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            vector_service.redis_client.setex(
+                                "crawl:last_time", 86400, crawl_time
+                            )
+                    except Exception as e:
+                        logger.warning(f"存储结果到 Redis 失败: {str(e)}")
+                
+                # 关闭线程池
+                async_crawler.shutdown()
+                
+            except Exception as e:
+                logger.error(f"批量爬取任务失败: {str(e)}")
+                crawl_task_manager.update_task_status(
+                    task_id,
+                    TaskStatus.FAILED,
+                    end_time=datetime.now().isoformat(),
+                    error_message=str(e)
+                )
+                try:
+                    async_crawler.shutdown()
+                except:
+                    pass
+        
+        # 启动后台线程
+        thread = Thread(target=run_batch_crawl, daemon=True)
+        thread.start()
+        
+        return {
+            "status": "accepted",
+            "message": "批量爬取任务已启动",
+            "task_id": task_id,
+            "total_urls": len(urls),
+            "max_workers": max_workers
+        }
+        
+    except Exception as e:
+        logger.error(f"启动批量爬取任务失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/config", summary="获取爬虫配置")
