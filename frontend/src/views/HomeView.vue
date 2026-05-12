@@ -297,8 +297,9 @@ onMounted(() => {
 
 @media (max-width: 768px) {
   .home-view {
-    padding: 8px;
+    padding: 0;
     height: calc(100vh - 56px - 40px);
+    width: 100%;
   }
 }
 

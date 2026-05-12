@@ -4,6 +4,7 @@
     :title="question ? `问题 ${index + 1}: ${question.title}` : ''"
     :footer="null"
     :width="modalWidth"
+    :style="isFullscreen ? { maxWidth: '100%', top: 0, padding: 0, margin: 0 } : {}"
     :body-style="{ padding: '24px', maxHeight: modalMaxHeight, overflowY: 'auto' }"
     :class="['question-detail-modal', { 'fullscreen': isFullscreen }]"
     @cancel="handleClose"
@@ -20,7 +21,8 @@
           问题 {{ index + 1 }}: {{ question?.title }}
         </span>
         <div class="modal-actions">
-          <a-tooltip :title="isFullscreen ? '退出全屏' : '全屏'">
+          <!-- 移动端默认全屏，不显示全屏切换按钮 -->
+          <a-tooltip v-if="!isMobile()" :title="isFullscreen ? '退出全屏' : '全屏'">
             <a-button type="text" size="small" @click="toggleFullscreen">
               <template #icon>
                 <FullscreenExitOutlined v-if="isFullscreen" />
@@ -274,12 +276,14 @@ const toggleFullscreen = () => {
   saveScrollPosition()
   
   isFullscreen.value = !isFullscreen.value
+  
+  // 动态设置宽度和高度
   if (isFullscreen.value) {
-    modalWidth.value = '100vw'
-    modalMaxHeight.value = 'calc(100vh - 110px)'
+    modalWidth.value = '100%'
+    modalMaxHeight.value = 'calc(100vh - 120px)'
   } else {
-    modalWidth.value = 800
-    modalMaxHeight.value = '70vh'
+    modalWidth.value = isMobile() ? '100%' : 800
+    modalMaxHeight.value = isMobile() ? 'calc(100vh - 110px)' : '70vh'
   }
   
   // 切换后恢复位置
@@ -553,23 +557,29 @@ onUnmounted(() => {
 }
 
 /* 模态框全屏样式 */
+:deep(.question-detail-modal.fullscreen) {
+  /* 移除 a-modal 默认的宽度限制 */
+  max-width: 100vw !important;
+  top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
 :deep(.question-detail-modal.fullscreen .ant-modal) {
+  width: 100% !important;
+  max-width: 100% !important; /* 覆盖控制台看到的 calc(100vw - 32px) */
   top: 0 !important;
   right: 0 !important;
   bottom: 0 !important;
   left: 0 !important;
-  width: 100vw !important;
-  max-width: 100vw !important;
-  height: 100vh !important;
   margin: 0 !important;
   padding: 0 !important;
 }
 
 :deep(.question-detail-modal.fullscreen .ant-modal-content) {
   height: 100vh !important;
+  border-radius: 0 !important;
   display: flex;
   flex-direction: column;
-  border-radius: 0 !important;
 }
 
 :deep(.question-detail-modal.fullscreen .ant-modal-body) {
