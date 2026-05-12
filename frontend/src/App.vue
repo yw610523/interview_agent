@@ -185,5 +185,12 @@ html, body {
     padding: 0 12px;
     justify-content: space-between; /* logo 和菜单分列两侧 */
   }
+
+  /* 移动端内容区域全屏显示 */
+  a-layout-content {
+    padding: 0 !important;
+    width: 100vw;
+    overflow-x: auto;
+  }
 }
 </style>
