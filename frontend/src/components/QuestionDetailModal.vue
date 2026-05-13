@@ -4,7 +4,6 @@
     :title="question ? `问题 ${index + 1}: ${question.title}` : ''"
     :footer="null"
     :width="modalWidth"
-    :style="isFullscreen ? { maxWidth: '100%', top: 0, padding: 0, margin: 0 } : {}"
     :body-style="{ padding: '24px', maxHeight: modalMaxHeight, overflowY: 'auto' }"
     :class="['question-detail-modal', { 'fullscreen': isFullscreen }]"
     @cancel="handleClose"
@@ -276,14 +275,14 @@ const toggleFullscreen = () => {
   saveScrollPosition()
   
   isFullscreen.value = !isFullscreen.value
-  
-  // 动态设置宽度和高度
+
+  const mobile = isMobile()
   if (isFullscreen.value) {
     modalWidth.value = '100%'
     modalMaxHeight.value = 'calc(100vh - 120px)'
   } else {
-    modalWidth.value = isMobile() ? '100%' : 800
-    modalMaxHeight.value = isMobile() ? 'calc(100vh - 110px)' : '70vh'
+    modalWidth.value = mobile ? '100%' : 800
+    modalMaxHeight.value = mobile ? 'calc(100vh - 110px)' : '70vh'
   }
   
   // 切换后恢复位置
@@ -557,13 +556,6 @@ onUnmounted(() => {
 }
 
 /* 模态框全屏样式 */
-:deep(.question-detail-modal.fullscreen) {
-  /* 移除 a-modal 默认的宽度限制 */
-  max-width: 100vw !important;
-  top: 0 !important;
-  padding-bottom: 0 !important;
-}
-
 :deep(.question-detail-modal.fullscreen .ant-modal) {
   width: 100% !important;
   max-width: 100% !important; /* 覆盖控制台看到的 calc(100vw - 32px) */

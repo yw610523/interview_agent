@@ -131,19 +131,13 @@ defineEmits(['itemClick', 'permanentDelete', 'restore', 'notQuestion'])
   .desktop-only {
     display: none !important;
   }
-  
-  .question-item {
-    padding: 12px 16px;
-    border-bottom: 1px solid #f0f0f0;
-  }
-  
+
   .question-title {
     font-size: 16px;
     margin-bottom: 0;
     line-height: 1.4;
   }
-  
-  /* 移动端列表项点击区域优化 */
+
   .question-item:active {
     background-color: #e6f7ff;
   }
