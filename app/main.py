@@ -29,6 +29,8 @@ from app.services.config_hot_reload import config_reload_manager
 from app.services.crawl_task_manager import crawl_task_manager, TaskStatus
 # 导入反馈服务
 from app.services.feedback_service import FeedbackService
+# 导入审核服务
+from app.services.review_service import ReviewService
 # 导入大模型和向量服务
 from app.services.llm_service import LLMService
 from app.services.vector_service import VectorService, VectorRecord
@@ -158,6 +160,7 @@ sse_log_queues: Dict[str, Queue] = {}
 llm_service = LLMService()
 vector_service = VectorService()
 feedback_service = FeedbackService()
+review_service = ReviewService()
 
 # 线程池（用于将同步I/O操作放入后台执行，不阻塞事件循环）
 executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="sync_io")
@@ -212,9 +215,11 @@ class SearchResult(BaseModel):
 
 
 @app.post("/api/questions/ingest", summary="接收并存储面试题")
-async def ingest_question(questions: List[InterviewQuestion]):
+async def ingest_question(questions: List[InterviewQuestion], auto_pending: bool = Query(True, description="是否自动进入待审核区（默认True）")):
     """
     接收来自爬虫或大模型分析后的面试题列表，并存入向量数据库
+    - auto_pending=True: 问题先进入待审核区，需要审核后才能入库
+    - auto_pending=False: 问题直接入库（适用于可信来源）
     """
     try:
         # 转换为 VectorRecord
@@ -232,10 +237,14 @@ async def ingest_question(questions: List[InterviewQuestion]):
             )
             records.append(record)
 
-        # 插入向量数据库
-        count = await run_sync(vector_service.insert_questions, records)
-
-        return {"status": "success", "count": count, "message": "数据已入库"}
+        if auto_pending:
+            # 保存到待审核区
+            count = await run_sync(review_service.save_pending_review, records, source="api_ingest")
+            return {"status": "success", "count": count, "message": f"数据已进入待审核区，等待审核"}
+        else:
+            # 直接插入向量数据库
+            count = await run_sync(vector_service.insert_questions, records)
+            return {"status": "success", "count": count, "message": "数据已直接入库"}
 
     except Exception as e:
         logger.error(f"Ingest error: {str(e)}")
@@ -294,9 +303,10 @@ def run_crawler() -> Dict[str, Any]:
                             category=q.category,
                         )
                         records.append(record)
-                    count = vector_service.insert_questions(records)
+                    # 保存到待审核区，而不是直接入库
+                    count = review_service.save_pending_review(records, source="batch_scheduled")
                     inserted_count += count
-                    logger.info(f"本页识别 {len(questions)} 个问题，已插入 {count} 个到向量数据库")
+                    logger.info(f"本页识别 {len(questions)} 个问题，已保存到待审核区")
 
                 # 调用大模型处理单个页面
                 parsed_questions = llm_service.parse_crawl_results(
@@ -520,7 +530,8 @@ async def trigger_crawl_async():
                                     category=q.category,
                                 )
                                 records.append(record)
-                            count = vector_service.insert_questions(records)
+                            # 保存到待审核区，而不是直接入库
+                            count = review_service.save_pending_review(records, source="batch_async")
                             inserted_count += count
 
                             # 更新任务进度
@@ -1957,9 +1968,10 @@ async def crawl_single_page_stream(url: str):
                                 category=q.category,
                             )
                             records.append(record)
-                        count = vector_service.insert_questions(records)
+                        # 保存到待审核区
+                        count = review_service.save_pending_review(records, source="single_url")
                         inserted_count += count
-                        log_callback(f"识别到 {len(questions)} 个问题，已插入 {count} 个", 75, "inserting")
+                        log_callback(f"识别到 {len(questions)} 个问题，已保存到待审核区", 75, "inserting")
 
                     log_callback("正在使用AI识别面试问题...", 30, "analyzing")
 
@@ -2180,7 +2192,8 @@ async def crawl_batch_urls(urls: List[str], max_workers: int = Query(5, ge=1, le
                                     category=q.category,
                                 )
                                 records.append(record)
-                            count = vector_service.insert_questions(records)
+                            # 保存到待审核区
+                            count = review_service.save_pending_review(records, source="batch_url_list")
                             inserted_count += count
 
                             task.parsed_questions += len(questions)
@@ -3243,7 +3256,8 @@ def scheduled_crawl():
                                 category=q.category,
                             )
                             records.append(record)
-                        count = vector_service.insert_questions(records)
+                        # 保存到待审核区
+                        count = review_service.save_pending_review(records, source="scheduled_crawl")
                         inserted_count += count
                         task.parsed_questions += len(questions)
                         task.inserted_questions = inserted_count
@@ -3434,6 +3448,153 @@ async def test_sitemap(sitemap_url: str = Query(..., description="要测试的 S
     except Exception as e:
         logger.error(f"Sitemap 测试失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Sitemap 测试失败: {str(e)}")
+
+
+# ==================== 审核相关 API ====================
+
+@app.get("/api/review/pending", summary="获取待审核问题列表")
+async def get_pending_list(
+    limit: int = Query(50, ge=1, le=100, description="返回数量"),
+    offset: int = Query(0, ge=0, description="偏移量")
+):
+    """
+    获取待审核问题列表（分页）
+    """
+    try:
+        questions = await run_sync(review_service.get_pending_list, limit, offset)
+        count = await run_sync(review_service.get_pending_count)
+        return {
+            "status": "success",
+            "questions": questions,
+            "total": count,
+            "limit": limit,
+            "offset": offset,
+        }
+    except Exception as e:
+        logger.error(f"获取待审核列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/review/pending/count", summary="获取待审核问题数量")
+async def get_pending_count():
+    """
+    获取待审核问题数量
+    """
+    try:
+        count = await run_sync(review_service.get_pending_count)
+        return {"status": "success", "count": count}
+    except Exception as e:
+        logger.error(f"获取待审核数量失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ApproveRequest(BaseModel):
+    ids: Optional[List[str]] = None
+    all: bool = False
+    check_similarity: bool = True
+
+
+class RejectRequest(BaseModel):
+    ids: List[str]
+    delete: bool = False
+
+
+@app.post("/api/review/approve", summary="审核通过问题")
+async def approve_questions(request: ApproveRequest):
+    """
+    审核通过问题，将问题从待审核区移动到正式库
+
+    - 指定 ids: 通过指定的问题
+    - all=True: 通过所有待审核问题
+    """
+    try:
+        if request.all:
+            result = await run_sync(review_service.approve_all, request.check_similarity)
+        elif request.ids:
+            result = await run_sync(
+                review_service.approve_questions,
+                request.ids,
+                request.check_similarity
+            )
+        else:
+            raise HTTPException(status_code=400, detail="必须指定 ids 或设置 all=true")
+
+        return result
+    except Exception as e:
+        logger.error(f"审核通过失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/review/reject", summary="审核拒绝问题")
+async def reject_questions(request: RejectRequest):
+    """
+    审核拒绝问题
+
+    - delete=True: 直接删除
+    - delete=False: 移入拒绝区（可恢复）
+    """
+    try:
+        if not request.ids:
+            raise HTTPException(status_code=400, detail="必须指定 ids")
+
+        result = await run_sync(
+            review_service.reject_questions,
+            request.ids,
+            request.delete
+        )
+        return result
+    except Exception as e:
+        logger.error(f"审核拒绝失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/review/rejected", summary="获取被拒绝的问题列表")
+async def get_rejected_list(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0)
+):
+    """
+    获取被拒绝的问题列表
+    """
+    try:
+        questions = await run_sync(review_service.get_rejected_list, limit, offset)
+        return {"status": "success", "questions": questions}
+    except Exception as e:
+        logger.error(f"获取拒绝列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RestoreRequest(BaseModel):
+    ids: List[str]
+
+
+@app.post("/api/review/restore", summary="恢复被拒绝的问题到待审核区")
+async def restore_rejected(request: RestoreRequest):
+    """
+    将被拒绝的问题恢复为待审核状态
+    """
+    try:
+        if not request.ids:
+            raise HTTPException(status_code=400, detail="必须指定 ids")
+
+        count = await run_sync(review_service.restore_rejected, request.ids)
+        return {"status": "success", "restored": count}
+    except Exception as e:
+        logger.error(f"恢复失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/review/stats", summary="获取审核统计信息")
+async def get_review_stats():
+    """
+    获取审核统计数据
+    """
+    try:
+        stats = await run_sync(review_service.get_stats)
+        return {"status": "success", "stats": stats}
+    except Exception as e:
+        logger.error(f"获取审核统计失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
