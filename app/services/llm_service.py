@@ -167,17 +167,18 @@ class LLMService:
                 logger.info(f"标题: {title}")
                 logger.info(f"内容长度: {len(content)} 字符")
 
-                # 使用chunk处理单页内容
-                questions = self._process_page_with_chunks(url, title, content)
-                all_questions.extend(questions)
+                # 创建每个chunk处理完的回调，用于即时入库
+                def on_chunk_processed(questions, chunk_idx):
+                    if questions and on_question_found:
+                        try:
+                            on_question_found(questions)
+                            logger.info(f"页面 {page_idx + 1} chunk {chunk_idx + 1} 的 {len(questions)} 个问题已即时入库")
+                        except Exception as e:
+                            logger.error(f"即时入库失败: {str(e)}")
 
-                # 立即入库：识别到问题就立即回调（如果提供了回调函数）
-                if questions and on_question_found:
-                    try:
-                        on_question_found(questions)
-                        logger.info(f"页面 {page_idx + 1} 的 {len(questions)} 个问题已即时入库")
-                    except Exception as e:
-                        logger.error(f"即时入库失败: {str(e)}")
+                # 使用chunk处理单页内容（每个chunk处理完立即回调）
+                questions = self._process_page_with_chunks(url, title, content, on_chunk_processed=on_chunk_processed)
+                all_questions.extend(questions)
 
                 logger.info(f"页面 {page_idx + 1} 识别出 {len(questions)} 个问题")
                 logger.info(f"累计识别: {len(all_questions)} 个问题")
@@ -532,7 +533,7 @@ def example():
 
         return "\n".join(content)
 
-    def _process_page_with_chunks(self, url: str, title: str, content: str) -> List[ParsedQuestion]:
+    def _process_page_with_chunks(self, url: str, title: str, content: str, on_chunk_processed=None) -> List[ParsedQuestion]:
         """
         处理单个页面，支持内容chunk分割和JSON解析失败重试
 
@@ -540,6 +541,7 @@ def example():
             url: 网页URL
             title: 网页标题
             content: 网页内容（Markdown格式）
+            on_chunk_processed: 每个chunk处理完成后的回调，签名: callback(questions: List[ParsedQuestion], chunk_idx: int)
 
         返回:
             从该页面提取的所有面试问题
@@ -678,6 +680,13 @@ URL: {url}
                     f"chunk {chunk_idx + 1}/{len(chunks)} 识别出 {len(questions)} 个问题（经过 {retry_count} 次重试）")
             else:
                 logger.info(f"chunk {chunk_idx + 1}/{len(chunks)} 识别出 {len(questions)} 个问题")
+
+            # 每个chunk处理完后立即回调（用于即时入库）
+            if on_chunk_processed:
+                try:
+                    on_chunk_processed(questions, chunk_idx)
+                except Exception as e:
+                    logger.error(f"chunk {chunk_idx + 1} 回调处理失败: {str(e)}")
 
             # 每处理10个chunk输出一次进度
             if (chunk_idx + 1) % 10 == 0:

@@ -416,8 +416,11 @@ const crawlSinglePage = async () => {
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        
-        if (data.type === 'start') {
+
+        if (data.type === 'heartbeat') {
+          // 心跳消息，不需要处理
+          return
+        } else if (data.type === 'start') {
           processingMessage.value = data.message
           processingProgress.value = data.progress
         } else if (data.type === 'log') {
@@ -428,11 +431,11 @@ const crawlSinglePage = async () => {
             step: data.step,
             timestamp: data.timestamp
           })
-          
+
           // 更新进度和消息
           processingProgress.value = data.progress
           processingMessage.value = data.message
-          
+
           // 自动滚动到底部
           setTimeout(() => {
             const logContainer = document.querySelector('.log-container')
@@ -444,12 +447,12 @@ const crawlSinglePage = async () => {
           // 处理完成
           singlePageResult.value = data.result
           message.success(`爬取成功！识别到 ${data.result.parsed_questions} 个问题`)
-          
+
           // 延迟隐藏处理状态
           setTimeout(() => {
             singlePageProcessing.value = false
           }, 1000)
-          
+
           // 关闭SSE连接
           eventSource.close()
           eventSource = null
@@ -463,13 +466,21 @@ const crawlSinglePage = async () => {
         console.error('解析SSE消息失败:', e)
       }
     }
-    
+
     eventSource.onerror = (error) => {
+      // 如果 readyState 是 2 (CLOSED)，说明是正常关闭或服务器主动关闭
+      if (eventSource && eventSource.readyState === 2) {
+        // 连接已关闭，不再处理
+        eventSource.close()
+        eventSource = null
+        // 如果还在处理中，说明是异常关闭
+        if (singlePageProcessing.value && !singlePageResult.value) {
+          message.warning('SSE连接已断开，请重试')
+          singlePageProcessing.value = false
+        }
+        return
+      }
       console.error('SSE连接错误:', error)
-      message.error('实时连接失败，请重试')
-      singlePageProcessing.value = false
-      eventSource.close()
-      eventSource = null
     }
     
   } catch (error) {
