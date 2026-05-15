@@ -238,3 +238,41 @@ export const promptsApi = {
     return apiClient.post('/prompts', prompts)
   }
 }
+
+// 审核管理 API
+export const reviewApi = {
+  // 获取待审核列表
+  getPendingList(limit = 50, offset = 0) {
+    return apiClient.get(`/review/pending?limit=${limit}&offset=${offset}`)
+  },
+
+  // 获取待审核数量
+  getPendingCount() {
+    return apiClient.get('/review/pending/count')
+  },
+
+  // 审核通过
+  approveQuestions(ids, all = false, checkSimilarity = true) {
+    return apiClient.post('/review/approve', { ids, all, check_similarity: checkSimilarity })
+  },
+
+  // 审核拒绝
+  rejectQuestions(ids, shouldDelete = false) {
+    return apiClient.post('/review/reject', { ids, delete: shouldDelete })
+  },
+
+  // 获取被拒绝列表
+  getRejectedList(limit = 50, offset = 0) {
+    return apiClient.get(`/review/rejected?limit=${limit}&offset=${offset}`)
+  },
+
+  // 恢复被拒绝的问题
+  restoreRejected(ids) {
+    return apiClient.post('/review/restore', { ids })
+  },
+
+  // 获取审核统计
+  getStats() {
+    return apiClient.get('/review/stats')
+  }
+}
