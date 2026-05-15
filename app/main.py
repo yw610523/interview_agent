@@ -2071,13 +2071,14 @@ async def crawl_single_page_stream(url: str):
             crawl_thread.start()
 
             # 持续从队列读取并发送SSE事件
+            heartbeat_counter = 0
             while True:
                 try:
                     # 在线程池中执行阻塞的队列读取操作
                     loop = asyncio.get_event_loop()
                     message = await loop.run_in_executor(
                         None,  # 使用默认线程池
-                        lambda: log_queue.get(timeout=1)
+                        lambda: log_queue.get(timeout=30)
                     )
 
                     if message == "ERROR":
@@ -2085,6 +2086,7 @@ async def crawl_single_page_stream(url: str):
                         break
 
                     yield f"data: {message}\n\n"
+                    heartbeat_counter = 0
 
                     # 检查是否是完成消息
                     if isinstance(message, str):
@@ -2096,6 +2098,12 @@ async def crawl_single_page_stream(url: str):
                             pass
 
                 except Empty:
+                    # 每30秒发送一次心跳，防止连接超时
+                    heartbeat_counter += 1
+                    if heartbeat_counter >= 1:  # 30秒没收到消息就发送心跳
+                        yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': time.time()})}\n\n"
+                        heartbeat_counter = 0
+
                     # 检查线程是否结束
                     if not crawl_thread.is_alive():
                         break
